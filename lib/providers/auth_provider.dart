@@ -1,0 +1,220 @@
+import 'dart:async';
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+
+import '../core/constants/app_constants.dart';
+import '../models/app_user.dart';
+import '../services/auth_service.dart';
+import '../services/firebase_error_messages.dart';
+import '../services/user_service.dart';
+
+class AuthProvider extends ChangeNotifier {
+  AuthProvider({
+    AuthService? authService,
+    UserService? userService,
+  })  : _authService = authService ?? AuthService(),
+        _userService = userService ?? UserService() {
+    _subscription = _authService!.authStateChanges.listen(
+      _handleAuthChanged,
+      onError: (Object error, StackTrace stackTrace) {
+        _error = 'Sesi gagal dimuat. Silakan masuk kembali.';
+        _status = AuthStatus.signedOut;
+        notifyListeners();
+      },
+    );
+  }
+
+  AuthProvider.forTesting()
+      : _authService = null,
+        _userService = null {
+    _subscription = const Stream<User?>.empty().listen((_) {});
+    _status = AuthStatus.signedOut;
+  }
+
+  final AuthService? _authService;
+  final UserService? _userService;
+  late final StreamSubscription<User?> _subscription;
+  AuthStatus _status = AuthStatus.checking;
+  AppUser? _user;
+  String? _error;
+  String _companyName = '';
+  bool _registering = false;
+
+  AuthStatus get status => _status;
+  AppUser? get user => _user;
+  String? get error => _error;
+  String get companyName => _companyName;
+  bool get isChecking => _status == AuthStatus.checking;
+  bool get isSignedIn => _status == AuthStatus.signedIn && _user != null;
+
+  Future<AppUser?> getUserProfile(String uid) => _userService!.getUser(uid);
+
+  void clearError() {
+    _error = null;
+    notifyListeners();
+  }
+
+  Future<void> _handleAuthChanged(User? firebaseUser) async {
+    if (_registering) return;
+    if (firebaseUser == null) {
+      _user = null;
+      _companyName = '';
+      _status = AuthStatus.signedOut;
+      notifyListeners();
+      return;
+    }
+    if (_user?.uid == firebaseUser.uid && _status == AuthStatus.signedIn) {
+      return;
+    }
+    await _loadUser(firebaseUser.uid);
+  }
+
+  Future<void> _loadUser(String uid) async {
+    _status = AuthStatus.checking;
+    notifyListeners();
+    try {
+      final profile = await _userService!.getUser(uid);
+      if (profile == null ||
+          profile.status != AccountStatuses.active ||
+          !UserRoles.all.contains(profile.role)) {
+        await _authService!.signOut();
+        _user = null;
+        _status = AuthStatus.signedOut;
+        _error = profile == null
+            ? 'Profil pengguna tidak ditemukan.'
+            : 'Akun atau role pengguna tidak valid.';
+      } else {
+        _user = profile;
+        _companyName = await _userService.getCompanyName(profile.companyId);
+        _status = AuthStatus.signedIn;
+        _error = null;
+      }
+    } on FirebaseException catch (exception) {
+      _status = AuthStatus.signedOut;
+      _error = firestoreErrorMessage(exception);
+      await _authService!.signOut();
+    } on HelpdeskException catch (exception) {
+      _status = AuthStatus.signedOut;
+      _error = exception.message;
+      await _authService!.signOut();
+    }
+    notifyListeners();
+  }
+
+  Future<bool> signIn(String email, String password) async {
+    _status = AuthStatus.checking;
+    _error = null;
+    notifyListeners();
+    try {
+      final profile = await _authService!.signIn(email, password);
+      _user = profile;
+      _companyName = await _userService!.getCompanyName(profile.companyId);
+      _status = AuthStatus.signedIn;
+      notifyListeners();
+      return true;
+    } on HelpdeskException catch (exception) {
+      _status = AuthStatus.signedOut;
+      _error = exception.message;
+      await _authService!.signOut();
+    } on FirebaseException catch (exception) {
+      _status = AuthStatus.signedOut;
+      _error = firestoreErrorMessage(exception);
+      await _authService!.signOut();
+    }
+    notifyListeners();
+    return false;
+  }
+
+  Future<bool> registerEmployee({
+    required String name,
+    required String email,
+    required String password,
+    required String department,
+    required String companyCode,
+  }) async {
+    _status = AuthStatus.checking;
+    _error = null;
+    _registering = true;
+    notifyListeners();
+    try {
+      _user = await _authService!.registerEmployee(
+        name: name,
+        email: email,
+        password: password,
+        department: department,
+        companyCode: companyCode,
+      );
+      _companyName = await _userService!.getCompanyName(_user!.companyId);
+      _status = AuthStatus.signedIn;
+      notifyListeners();
+      return true;
+    } on HelpdeskException catch (exception) {
+      _status = AuthStatus.signedOut;
+      _error = exception.message;
+      await _authService!.signOut();
+    } on FirebaseException catch (exception) {
+      _status = AuthStatus.signedOut;
+      _error = firestoreErrorMessage(exception);
+      await _authService!.signOut();
+    } finally {
+      _registering = false;
+    }
+    notifyListeners();
+    return false;
+  }
+
+  Future<bool> sendPasswordReset(String email) async {
+    _error = null;
+    try {
+      await _authService!.sendPasswordReset(email);
+      return true;
+    } on HelpdeskException catch (exception) {
+      _error = exception.message;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> updateProfile({
+    required String name,
+    String? department,
+  }) async {
+    final currentUser = _user;
+    if (currentUser == null) return false;
+    _error = null;
+    try {
+      await _userService!.updateProfile(
+        user: currentUser,
+        name: name,
+        department: department,
+      );
+      _user = currentUser.copyWith(
+        name: name.trim(),
+        department: department?.trim(),
+      );
+      notifyListeners();
+      return true;
+    } on FirebaseException catch (exception) {
+      _error = firestoreErrorMessage(exception);
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<void> signOut() async {
+    await _authService!.signOut();
+    _user = null;
+    _status = AuthStatus.signedOut;
+    _error = null;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _subscription.cancel();
+    super.dispose();
+  }
+}
+
+enum AuthStatus { checking, signedOut, signedIn }

@@ -1,0 +1,187 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function me() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActive() {
+      return signedIn() && me().status == 'active';
+    }
+
+    function isAdmin() {
+      return isActive() && me().role == 'admin';
+    }
+
+    function validCategory(category) {
+      return category in [
+        'Komputer/Laptop',
+        'Printer',
+        'Jaringan',
+        'Aplikasi/Software',
+        'Lainnya'
+      ];
+    }
+
+    function validPriority(priority) {
+      return priority in ['CITO', 'Segera', 'Biasa'];
+    }
+
+    function validStatus(status) {
+      return status in ['Menunggu', 'Diproses', 'Selesai', 'Dibatalkan'];
+    }
+
+    function changedOnly(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    function parentTicket(ticketId) {
+      return get(/databases/$(database)/documents/tickets/$(ticketId)).data;
+    }
+
+    function parentTicketAfter(ticketId) {
+      return getAfter(/databases/$(database)/documents/tickets/$(ticketId)).data;
+    }
+
+    match /company_codes/{code} {
+      allow get: if true;
+      allow list, write: if false;
+    }
+
+    match /companies/{companyId} {
+      allow get: if isActive() && me().companyId == companyId;
+      allow list, write: if false;
+    }
+
+    match /users/{uid} {
+      allow get, list: if signedIn() &&
+        (request.auth.uid == uid ||
+         (isAdmin() && me().companyId == resource.data.companyId));
+
+      allow create: if signedIn() &&
+        request.auth.uid == uid &&
+        request.resource.data.role == 'user' &&
+        request.resource.data.status == 'active' &&
+        request.resource.data.keys().hasAll([
+          'name', 'email', 'role', 'companyId', 'companyCode',
+          'status', 'department', 'createdAt'
+        ]) &&
+        request.resource.data.keys().hasOnly([
+          'name', 'email', 'role', 'companyId', 'companyCode',
+          'status', 'department', 'createdAt'
+        ]) &&
+        get(/databases/$(database)/documents/company_codes/$(request.resource.data.companyCode)).data.active == true &&
+        get(/databases/$(database)/documents/company_codes/$(request.resource.data.companyCode)).data.companyId ==
+          request.resource.data.companyId;
+
+      allow update: if signedIn() &&
+        request.auth.uid == uid &&
+        changedOnly(['name', 'department']) &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() > 0 &&
+        request.resource.data.department is string;
+
+      allow delete: if false;
+    }
+
+    match /tickets/{ticketId} {
+      allow read: if isActive() &&
+        (resource.data.userId == request.auth.uid ||
+         (isAdmin() && resource.data.companyId == me().companyId));
+
+      allow create: if isActive() &&
+        me().role == 'user' &&
+        request.resource.data.keys().hasAll([
+          'ticketNumber', 'title', 'description', 'category', 'priority',
+          'status', 'userId', 'userName', 'companyId', 'createdAt',
+          'updatedAt', 'resolvedAt'
+        ]) &&
+        request.resource.data.keys().hasOnly([
+          'ticketNumber', 'title', 'description', 'category', 'priority',
+          'status', 'userId', 'userName', 'companyId', 'createdAt',
+          'updatedAt', 'resolvedAt'
+        ]) &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.userName == me().name &&
+        request.resource.data.companyId == me().companyId &&
+                request.resource.data.ticketNumber is string &&
+        request.resource.data.ticketNumber.matches('HD-[A-Z0-9]{6}') &&
+        request.resource.data.status == 'Menunggu' &&
+        request.resource.data.title is string &&
+        request.resource.data.title.size() > 0 &&
+        request.resource.data.title.size() <= 100 &&
+        request.resource.data.description is string &&
+        request.resource.data.description.size() > 0 &&
+        request.resource.data.description.size() <= 1000 &&
+        validCategory(request.resource.data.category) &&
+        validPriority(request.resource.data.priority) &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.updatedAt == request.time &&
+        request.resource.data.resolvedAt == null;
+
+      allow update: if (
+          isActive() &&
+          resource.data.userId == request.auth.uid &&
+          resource.data.status == 'Menunggu' &&
+          changedOnly([
+            'title', 'description', 'category', 'priority',
+            'status', 'updatedAt'
+          ]) &&
+          request.resource.data.status in ['Menunggu', 'Dibatalkan'] &&
+          request.resource.data.title is string &&
+          request.resource.data.title.size() > 0 &&
+          request.resource.data.title.size() <= 100 &&
+          request.resource.data.description is string &&
+          request.resource.data.description.size() > 0 &&
+          request.resource.data.description.size() <= 1000 &&
+          validCategory(request.resource.data.category) &&
+          validPriority(request.resource.data.priority) &&
+          request.resource.data.updatedAt == request.time
+        ) || (
+          isAdmin() &&
+          resource.data.companyId == me().companyId &&
+          resource.data.status != 'Dibatalkan' &&
+          changedOnly(['status', 'updatedAt', 'resolvedAt']) &&
+          request.resource.data.status in ['Menunggu', 'Diproses', 'Selesai'] &&
+          request.resource.data.updatedAt == request.time &&
+          (request.resource.data.status == 'Selesai'
+            ? request.resource.data.resolvedAt == request.time
+            : request.resource.data.resolvedAt == null)
+        );
+
+      allow delete: if false;
+
+      match /updates/{updateId} {
+        allow read: if isActive() &&
+          (parentTicket(ticketId).userId == request.auth.uid ||
+           (isAdmin() && parentTicket(ticketId).companyId == me().companyId));
+
+        allow create: if isAdmin() &&
+          parentTicket(ticketId).companyId == me().companyId &&
+          parentTicket(ticketId).status != 'Dibatalkan' &&
+          request.resource.data.keys().hasOnly([
+            'adminId', 'adminName', 'oldStatus', 'newStatus', 'note',
+            'createdAt'
+          ]) &&
+          request.resource.data.keys().hasAll([
+            'adminId', 'adminName', 'oldStatus', 'newStatus', 'note',
+            'createdAt'
+          ]) &&
+          request.resource.data.adminId == request.auth.uid &&
+          request.resource.data.adminName == me().name &&
+          request.resource.data.oldStatus == parentTicket(ticketId).status &&
+          request.resource.data.newStatus == parentTicketAfter(ticketId).status &&
+          validStatus(request.resource.data.oldStatus) &&
+          request.resource.data.newStatus in ['Menunggu', 'Diproses', 'Selesai'] &&
+          request.resource.data.note is string &&
+          request.resource.data.createdAt == request.time;
+
+        allow update, delete: if false;
+      }
+    }
+  }
+}
