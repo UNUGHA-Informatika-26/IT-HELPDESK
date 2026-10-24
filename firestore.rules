@@ -108,7 +108,7 @@ service cloud.firestore {
         request.resource.data.userId == request.auth.uid &&
         request.resource.data.userName == me().name &&
         request.resource.data.companyId == me().companyId &&
-                request.resource.data.ticketNumber is string &&
+              request.resource.data.ticketNumber is string &&
         request.resource.data.ticketNumber.matches('HD-[A-Z0-9]{6}') &&
         request.resource.data.status == 'Menunggu' &&
         request.resource.data.title is string &&
@@ -153,7 +153,13 @@ service cloud.firestore {
             : request.resource.data.resolvedAt == null)
         );
 
-      allow delete: if false;
+      allow delete: if isActive() && (
+        (resource.data.userId == request.auth.uid &&
+         resource.data.status == 'Menunggu') ||
+        (isAdmin() &&
+         resource.data.companyId == me().companyId &&
+         resource.data.status in ['Menunggu', 'Dibatalkan'])
+      );
 
       match /updates/{updateId} {
         allow read: if isActive() &&
@@ -180,8 +186,50 @@ service cloud.firestore {
           request.resource.data.note is string &&
           request.resource.data.createdAt == request.time;
 
-        allow update, delete: if false;
+        allow update: if false;
+        allow delete: if isActive() && (
+          (parentTicket(ticketId).userId == request.auth.uid &&
+           parentTicket(ticketId).status == 'Menunggu') ||
+          (isAdmin() &&
+           parentTicket(ticketId).companyId == me().companyId &&
+           parentTicket(ticketId).status in ['Menunggu', 'Dibatalkan'])
+        );
       }
+    }
+
+    match /notifications/{notificationId} {
+      allow get, list: if isActive() &&
+        resource.data.userId == request.auth.uid;
+
+      allow create: if isAdmin() &&
+        request.resource.data.keys().hasAll([
+          'userId', 'companyId', 'type', 'ticketNumber', 'ticketTitle',
+          'reason', 'adminName', 'createdAt', 'read'
+        ]) &&
+        request.resource.data.keys().hasOnly([
+          'userId', 'companyId', 'type', 'ticketNumber', 'ticketTitle',
+          'reason', 'adminName', 'createdAt', 'read'
+        ]) &&
+        request.resource.data.userId is string &&
+        get(/databases/$(database)/documents/users/$(request.resource.data.userId)).data.companyId == me().companyId &&
+        request.resource.data.companyId == me().companyId &&
+        request.resource.data.type == 'ticket_deleted' &&
+        request.resource.data.adminName == me().name &&
+        request.resource.data.read == false &&
+        request.resource.data.reason is string &&
+        request.resource.data.reason.size() >= 1 &&
+        request.resource.data.reason.size() <= 300 &&
+        request.resource.data.ticketNumber is string &&
+        request.resource.data.ticketTitle is string &&
+        request.resource.data.createdAt == request.time;
+
+      allow update: if isActive() &&
+        resource.data.userId == request.auth.uid &&
+        changedOnly(['read']) &&
+        request.resource.data.read is bool;
+
+      allow delete: if isActive() &&
+        resource.data.userId == request.auth.uid;
     }
   }
 }

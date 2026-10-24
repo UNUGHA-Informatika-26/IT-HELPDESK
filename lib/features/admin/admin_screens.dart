@@ -157,13 +157,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   ),
                 ),
                 const SectionHeading(title: 'Ringkasan tiket'),
-                GridView.count(
-                  crossAxisCount: 2,
+                                GridView(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  childAspectRatio: 1.85,
-                  crossAxisSpacing: 9,
-                  mainAxisSpacing: 9,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    mainAxisExtent: 112,
+                    crossAxisSpacing: 9,
+                    mainAxisSpacing: 9,
+                  ),
                   children: [
                     for (final status in TicketStatuses.all)
                       StatusSummaryCard(
@@ -601,13 +603,15 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
                   ),
                 ),
                 const SectionHeading(title: 'Ringkasan status'),
-                GridView.count(
-                  crossAxisCount: 2,
+                                GridView(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  childAspectRatio: 1.85,
-                  crossAxisSpacing: 9,
-                  mainAxisSpacing: 9,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    mainAxisExtent: 112,
+                    crossAxisSpacing: 9,
+                    mainAxisSpacing: 9,
+                  ),
                   children: [
                     for (final status in TicketStatuses.all)
                       StatusSummaryCard(

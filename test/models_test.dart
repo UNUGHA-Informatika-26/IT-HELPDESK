@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:it_helpdesk_flutter/core/constants/app_constants.dart';
+import 'package:it_helpdesk_flutter/models/app_notification.dart';
 import 'package:it_helpdesk_flutter/models/app_user.dart';
 import 'package:it_helpdesk_flutter/models/ticket.dart';
 
@@ -65,6 +66,36 @@ void main() {
       expect(restored.createdAt, original.createdAt);
       expect(restored.updatedAt, original.updatedAt);
       expect(restored.resolvedAt, isNull);
+    });
+  });
+
+  group('AppNotification serialization', () {
+    test('round-trips the notification map and document ID', () {
+      final original = AppNotification(
+        id: 'notification-1',
+        userId: 'user-1',
+        companyId: 'company-1',
+        type: 'ticket_deleted',
+        ticketNumber: 'HD-A1B2C3',
+        ticketTitle: 'Printer tidak merespons',
+        reason: 'Tiket duplikat.',
+        adminName: 'Budi Santoso',
+        createdAt: DateTime.utc(2026, 1, 2, 3, 4),
+        read: false,
+      );
+
+      final restored = AppNotification.fromMap(original.id, original.toMap());
+
+      expect(restored.id, original.id);
+      expect(restored.userId, original.userId);
+      expect(restored.companyId, original.companyId);
+      expect(restored.type, original.type);
+      expect(restored.ticketNumber, original.ticketNumber);
+      expect(restored.ticketTitle, original.ticketTitle);
+      expect(restored.reason, original.reason);
+      expect(restored.adminName, original.adminName);
+      expect(restored.createdAt, original.createdAt);
+      expect(restored.read, original.read);
     });
   });
 }

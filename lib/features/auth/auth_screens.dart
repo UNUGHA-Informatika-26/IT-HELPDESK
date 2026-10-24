@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
-import 'package:provider/provider.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/form_validators.dart';
 import '../../providers/auth_provider.dart';
+import 'cubit/login_cubit.dart';
+import 'cubit/login_state.dart';
 
 class SplashScreen extends StatelessWidget {
   const SplashScreen({super.key});
@@ -16,7 +18,11 @@ class SplashScreen extends StatelessWidget {
           width: double.infinity,
           decoration: const BoxDecoration(
             gradient: LinearGradient(
-              colors: [Color(0xFF0E5FD2), AppColors.primary, AppColors.primaryDark],
+              colors: [
+                Color(0xFF0E5FD2),
+                AppColors.primary,
+                AppColors.primaryDark
+              ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
@@ -188,9 +194,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     Text(
                       slide.$2,
                       textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                      style:
+                          Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
                     ),
                     const SizedBox(height: 10),
                     Text(
@@ -237,8 +244,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _passwordVisible = false;
-  bool _busy = false;
-  String? _validationError;
 
   @override
   void dispose() {
@@ -247,131 +252,141 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  Future<void> _submit() async {
-    context.read<AuthProvider>().clearError();
-    setState(() => _validationError = null);
-    final email = _emailController.text.trim();
-    final password = _passwordController.text;
-    if (email.isEmpty || password.isEmpty) {
-      setState(() => _validationError = 'Email dan password wajib diisi.');
-      return;
-    }
-    final emailError = FormValidators.email(email);
-    if (emailError != null) {
-      setState(() => _validationError = emailError);
-      return;
-    }
-    setState(() => _busy = true);
-    await context.read<AuthProvider>().signIn(email, password);
-    if (mounted) setState(() => _busy = false);
-  }
+  void _submit(BuildContext context) => context
+      .read<LoginCubit>()
+      .login(_emailController.text.trim(), _passwordController.text);
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        body: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 440),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Center(
-                        child: _AppLogo(size: 56),
-                      ),
-                      const SizedBox(height: 28),
-                      Text(
-                        'Selamat datang',
-                        style: Theme.of(context).textTheme.headlineSmall
-                            ?.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(height: 6),
-                      const Text(
-                        'Masuk untuk melanjutkan ke IT Helpdesk',
-                        style: TextStyle(color: AppColors.muted),
-                      ),
-                      const SizedBox(height: 24),
-                      TextFormField(
-                        key: const ValueKey('login-email'),
-                        controller: _emailController,
-                        keyboardType: TextInputType.emailAddress,
-                        textInputAction: TextInputAction.next,
-                        decoration: const InputDecoration(
-                          labelText: 'Email',
-                          prefixIcon: Icon(Icons.email_outlined),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      TextFormField(
-                        key: const ValueKey('login-password'),
-                        controller: _passwordController,
-                        obscureText: !_passwordVisible,
-                        onFieldSubmitted: (_) => _submit(),
-                        decoration: InputDecoration(
-                          labelText: 'Password',
-                          prefixIcon: const Icon(Icons.lock_outline),
-                          suffixIcon: IconButton(
-                            tooltip: 'Tampilkan password',
-                            onPressed: () => setState(
-                              () => _passwordVisible = !_passwordVisible,
+  Widget build(BuildContext context) => BlocProvider<LoginCubit>(
+        create: (context) => LoginCubit(context.read<AuthProvider>()),
+        child: BlocConsumer<LoginCubit, LoginState>(
+          listener: (context, state) {},
+          builder: (context, state) {
+            final failure = state is LoginFailure ? state : null;
+            final isLoading = state is LoginLoading;
+            return Scaffold(
+              body: SafeArea(
+                child: Center(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(24),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 440),
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const Center(
+                              child: _AppLogo(size: 56),
                             ),
-                            icon: Icon(
-                              _passwordVisible
-                                  ? Icons.visibility_off_outlined
-                                  : Icons.visibility_outlined,
+                            const SizedBox(height: 28),
+                            Text(
+                              'Selamat datang',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .headlineSmall
+                                  ?.copyWith(fontWeight: FontWeight.w700),
                             ),
-                          ),
-                        ),
-                      ),
-                      if (_validationError != null ||
-                          context.watch<AuthProvider>().error != null) ...[
-                        const SizedBox(height: 12),
-                        _InlineError(
-                          text: _validationError ??
-                              context.watch<AuthProvider>().error!,
-                        ),
-                      ],
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          onPressed: () =>
-                              context.go(AppRoutes.resetPassword),
-                          child: const Text('Lupa Password?'),
-                        ),
-                      ),
-                      FilledButton(
-                        onPressed: _busy ? null : _submit,
-                        child: Text(_busy ? 'Memproses...' : 'Masuk'),
-                      ),
-                      const SizedBox(height: 18),
-                      Wrap(
-                        alignment: WrapAlignment.center,
-                        children: [
-                          const Text(
-                            'Belum punya akun? ',
-                            style: TextStyle(color: AppColors.muted),
-                          ),
-                          GestureDetector(
-                            onTap: () => context.go(AppRoutes.register),
-                            child: const Text(
-                              'Daftar',
-                              style: TextStyle(
-                                color: AppColors.primary,
-                                fontWeight: FontWeight.w700,
+                            const SizedBox(height: 6),
+                            const Text(
+                              'Masuk untuk melanjutkan ke IT Helpdesk',
+                              style: TextStyle(color: AppColors.muted),
+                            ),
+                            const SizedBox(height: 24),
+                            TextFormField(
+                              key: const ValueKey('login-email'),
+                              controller: _emailController,
+                              enabled: !isLoading,
+                              keyboardType: TextInputType.emailAddress,
+                              textInputAction: TextInputAction.next,
+                              onChanged: (_) =>
+                                  context.read<LoginCubit>().reset(),
+                              decoration: InputDecoration(
+                                labelText: 'Email',
+                                prefixIcon: Icon(Icons.email_outlined),
+                                errorText: failure?.emailError,
                               ),
                             ),
-                          ),
-                        ],
+                            const SizedBox(height: 14),
+                            TextFormField(
+                              key: const ValueKey('login-password'),
+                              controller: _passwordController,
+                              enabled: !isLoading,
+                              obscureText: !_passwordVisible,
+                              onChanged: (_) =>
+                                  context.read<LoginCubit>().reset(),
+                              onFieldSubmitted: (_) => _submit(context),
+                              decoration: InputDecoration(
+                                labelText: 'Password',
+                                prefixIcon: const Icon(Icons.lock_outline),
+                                errorText: failure?.passwordError,
+                                suffixIcon: IconButton(
+                                  tooltip: 'Tampilkan password',
+                                  onPressed: () => setState(
+                                    () => _passwordVisible = !_passwordVisible,
+                                  ),
+                                  icon: Icon(
+                                    _passwordVisible
+                                        ? Icons.visibility_off_outlined
+                                        : Icons.visibility_outlined,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            if (failure?.message.isNotEmpty == true) ...[
+                              const SizedBox(height: 12),
+                              _InlineError(text: failure!.message),
+                            ],
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton(
+                                onPressed: () =>
+                                    context.go(AppRoutes.resetPassword),
+                                child: const Text('Lupa Password?'),
+                              ),
+                            ),
+                            FilledButton(
+                              onPressed:
+                                  isLoading ? null : () => _submit(context),
+                              child: isLoading
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Text('Masuk'),
+                            ),
+                            const SizedBox(height: 18),
+                            Wrap(
+                              alignment: WrapAlignment.center,
+                              children: [
+                                const Text(
+                                  'Belum punya akun? ',
+                                  style: TextStyle(color: AppColors.muted),
+                                ),
+                                GestureDetector(
+                                  onTap: () => context.go(AppRoutes.register),
+                                  child: const Text(
+                                    'Daftar',
+                                    style: TextStyle(
+                                      color: AppColors.primary,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       );
 }
@@ -497,7 +512,8 @@ class _RegisterEmployeeScreenState extends State<RegisterEmployeeScreen> {
                 label: 'Kode perusahaan',
                 textCapitalization: TextCapitalization.characters,
               ),
-              if (_formError != null || context.watch<AuthProvider>().error != null) ...[
+              if (_formError != null ||
+                  context.watch<AuthProvider>().error != null) ...[
                 const SizedBox(height: 12),
                 _InlineError(
                   text: _formError ?? context.watch<AuthProvider>().error!,
@@ -622,8 +638,7 @@ class AccessDeniedScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthProvider>().user;
-    final requiredRole =
-        user?.isAdmin == true ? 'Karyawan' : 'Admin IT';
+    final requiredRole = user?.isAdmin == true ? 'Karyawan' : 'Admin IT';
     return Scaffold(
       body: SafeArea(
         child: Padding(

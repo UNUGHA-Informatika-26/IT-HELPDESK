@@ -8,9 +8,11 @@ import '../../core/theme/app_theme.dart';
 import '../../core/utils/date_formatter.dart';
 import '../../core/utils/form_validators.dart';
 import '../../models/app_user.dart';
+import '../../models/app_notification.dart';
 import '../../models/ticket.dart';
 import '../../models/ticket_update.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/notification_provider.dart';
 import '../../providers/ticket_provider.dart';
 import '../../widgets/helpdesk_widgets.dart';
 
@@ -18,7 +20,8 @@ class EmployeeDashboardScreen extends StatefulWidget {
   const EmployeeDashboardScreen({super.key});
 
   @override
-  State<EmployeeDashboardScreen> createState() => _EmployeeDashboardScreenState();
+  State<EmployeeDashboardScreen> createState() =>
+      _EmployeeDashboardScreenState();
 }
 
 class _EmployeeDashboardScreenState extends State<EmployeeDashboardScreen> {
@@ -51,16 +54,16 @@ class _EmployeeDashboardScreenState extends State<EmployeeDashboardScreen> {
               return ErrorState(
                 message: 'Tiket gagal dimuat. Periksa koneksi internet.',
                 onRetry: () => setState(
-                  () => _tickets = context
-                      .read<TicketProvider>()
-                      .watchTickets(user),
+                  () => _tickets =
+                      context.read<TicketProvider>().watchTickets(user),
                 ),
               );
             }
             if (!snapshot.hasData) return const LoadingState();
             final tickets = snapshot.data!;
-            final signature =
-                tickets.map((ticket) => '${ticket.id}:${ticket.status}').join('|');
+            final signature = tickets
+                .map((ticket) => '${ticket.id}:${ticket.status}')
+                .join('|');
             if (_countSignature != signature) {
               _countSignature = signature;
               WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -94,6 +97,15 @@ class _EmployeeDashboardScreenState extends State<EmployeeDashboardScreen> {
                           const SizedBox(height: 4),
                           _CompanyLine(name: auth.companyName),
                         ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Pemberitahuan',
+                      onPressed: () =>
+                          context.go(AppRoutes.employeeNotifications),
+                      icon: _NotificationBell(
+                        unreadCount:
+                            context.watch<NotificationProvider>().unreadCount,
                       ),
                     ),
                     _InitialAvatar(name: user.name),
@@ -211,6 +223,162 @@ class _EmployeeDashboardScreenState extends State<EmployeeDashboardScreen> {
   }
 }
 
+class NotificationsScreen extends StatelessWidget {
+  const NotificationsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<NotificationProvider>();
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Pemberitahuan'),
+        leading: IconButton(
+          tooltip: 'Kembali',
+          onPressed: () => context.go(AppRoutes.employeeHome),
+          icon: const Icon(Icons.arrow_back),
+        ),
+        actions: [
+          if (provider.unreadCount > 0)
+            TextButton(
+              onPressed: provider.isBusy
+                  ? null
+                  : () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      final ok = await context
+                          .read<NotificationProvider>()
+                          .markAllRead();
+                      if (!context.mounted || ok) return;
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: Text(
+                              context.read<NotificationProvider>().error ??
+                                  'Pemberitahuan gagal diperbarui.'),
+                        ),
+                      );
+                    },
+              child: const Text('Tandai semua dibaca'),
+            ),
+        ],
+      ),
+      body: provider.isLoading
+          ? const LoadingState()
+          : provider.error != null
+              ? ErrorState(
+                  message: provider.error!,
+                  onRetry: context.read<NotificationProvider>().retry,
+                )
+              : provider.notifications.isEmpty
+                  ? const EmptyState(title: 'Belum ada pemberitahuan')
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+                      itemCount: provider.notifications.length,
+                      separatorBuilder: (_, __) =>
+                          const Divider(height: 1, indent: 16),
+                      itemBuilder: (context, index) => _NotificationTile(
+                        notification: provider.notifications[index],
+                      ),
+                    ),
+    );
+  }
+}
+
+class _NotificationBell extends StatelessWidget {
+  const _NotificationBell({required this.unreadCount});
+
+  final int unreadCount;
+
+  @override
+  Widget build(BuildContext context) => Stack(
+        clipBehavior: Clip.none,
+        children: [
+          const Icon(Icons.notifications_none),
+          if (unreadCount > 0)
+            Positioned(
+              right: -7,
+              top: -7,
+              child: Container(
+                constraints: const BoxConstraints(minWidth: 17, minHeight: 17),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: const BoxDecoration(
+                  color: AppColors.cancelled,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  unreadCount > 99 ? '99+' : '$unreadCount',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      );
+}
+
+class _NotificationTile extends StatelessWidget {
+  const _NotificationTile({required this.notification});
+
+  final AppNotification notification;
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.read<NotificationProvider>();
+    final message =
+        'Tiket ${notification.ticketNumber} "${notification.ticketTitle}" '
+        'dihapus oleh ${notification.adminName}. Alasan: ${notification.reason}';
+    return ListTile(
+      tileColor: notification.read ? null : AppColors.primarySoft,
+      leading: notification.read
+          ? const SizedBox(width: 10)
+          : const Icon(Icons.circle, size: 9, color: AppColors.primary),
+      title: Text(
+        message,
+        style: TextStyle(
+          fontWeight: notification.read ? FontWeight.normal : FontWeight.w700,
+        ),
+      ),
+      subtitle: Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Text(
+          formatIndonesianDate(notification.createdAt),
+          style: const TextStyle(color: AppColors.muted, fontSize: 12),
+        ),
+      ),
+      trailing: IconButton(
+        tooltip: 'Hapus pemberitahuan',
+        icon: const Icon(Icons.delete_outline),
+        color: AppColors.cancelled,
+        onPressed: () async {
+          final messenger = ScaffoldMessenger.of(context);
+          final ok = await provider.deleteNotification(notification.id);
+          if (!context.mounted || ok) return;
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(provider.error ?? 'Pemberitahuan gagal dihapus.'),
+            ),
+          );
+        },
+      ),
+      onTap: notification.read
+          ? null
+          : () async {
+              final messenger = ScaffoldMessenger.of(context);
+              final ok = await provider.markRead(notification.id);
+              if (!context.mounted || ok) return;
+              messenger.showSnackBar(
+                SnackBar(
+                  content:
+                      Text(provider.error ?? 'Pemberitahuan gagal diperbarui.'),
+                ),
+              );
+            },
+    );
+  }
+}
+
 class EmployeeTicketsScreen extends StatefulWidget {
   const EmployeeTicketsScreen({super.key});
 
@@ -279,9 +447,8 @@ class _EmployeeTicketsScreenState extends State<EmployeeTicketsScreen> {
           final filtered = tickets.where((ticket) {
             final matchesStatus =
                 _filter == 'Semua' || ticket.status == _filter;
-            final matchesSearch =
-                ticket.title.toLowerCase().contains(query) ||
-                    ticket.ticketNumber.toLowerCase().contains(query);
+            final matchesSearch = ticket.title.toLowerCase().contains(query) ||
+                ticket.ticketNumber.toLowerCase().contains(query);
             return matchesStatus && matchesSearch;
           }).toList();
           return Column(
@@ -300,7 +467,8 @@ class _EmployeeTicketsScreenState extends State<EmployeeTicketsScreen> {
               SizedBox(
                 height: 54,
                 child: ListView(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
                   scrollDirection: Axis.horizontal,
                   children: [
                     'Semua',
@@ -320,7 +488,8 @@ class _EmployeeTicketsScreenState extends State<EmployeeTicketsScreen> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
                 child: Row(
                   children: [
                     Text(
@@ -344,8 +513,7 @@ class _EmployeeTicketsScreenState extends State<EmployeeTicketsScreen> {
                     : ListView.separated(
                         padding: const EdgeInsets.fromLTRB(18, 3, 18, 18),
                         itemCount: filtered.length,
-                        separatorBuilder: (_, __) =>
-                            const SizedBox(height: 10),
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
                         itemBuilder: (context, index) {
                           final ticket = filtered[index];
                           return TicketCard(
@@ -397,8 +565,7 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
         _title.text.trim().isEmpty ||
         _description.text.trim().isEmpty) {
       setState(() {
-        _validationError =
-            'Lengkapi semua field wajib sebelum mengirim.';
+        _validationError = 'Lengkapi semua field wajib sebelum mengirim.';
       });
       return;
     }
@@ -557,8 +724,9 @@ class _EditTicketScreenState extends State<EditTicketScreen> {
               return ErrorState(
                 message: 'Tiket gagal dimuat.',
                 onRetry: () => setState(
-                  () => _ticket =
-                      context.read<TicketProvider>().watchTicket(widget.ticketId),
+                  () => _ticket = context
+                      .read<TicketProvider>()
+                      .watchTicket(widget.ticketId),
                 ),
               );
             }
@@ -638,7 +806,9 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
           title: const Text('Detail Tiket'),
           leading: IconButton(
             onPressed: () => context.go(
-              widget.isAdmin ? AppRoutes.adminTickets : AppRoutes.employeeTickets,
+              widget.isAdmin
+                  ? AppRoutes.adminTickets
+                  : AppRoutes.employeeTickets,
             ),
             icon: const Icon(Icons.arrow_back),
           ),
@@ -659,7 +829,13 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
             if (!ticketSnapshot.hasData) return const LoadingState();
             final ticket = ticketSnapshot.data;
             if (ticket == null) {
-              return const EmptyState(title: 'Tiket tidak ditemukan');
+              return widget.isAdmin
+                  ? const EmptyState(title: 'Tiket tidak ditemukan')
+                  : EmptyState(
+                      title: 'Tiket ini sudah dihapus atau tidak tersedia',
+                      actionLabel: 'Kembali ke Tiket Saya',
+                      onAction: () => context.go(AppRoutes.employeeTickets),
+                    );
             }
             return StreamBuilder<List<TicketUpdate>>(
               stream: _updates,
@@ -836,6 +1012,22 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
             ),
           ),
         ),
+        if ((widget.isAdmin &&
+                (ticket.status == TicketStatuses.waiting ||
+                    ticket.status == TicketStatuses.cancelled)) ||
+            (!widget.isAdmin &&
+                isOwner &&
+                ticket.status == TicketStatuses.waiting)) ...[
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            onPressed: () => _confirmDelete(context, ticket),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.cancelled,
+            ),
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Hapus tiket'),
+          ),
+        ],
       ],
     );
   }
@@ -845,7 +1037,9 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
     List<TicketUpdate> updates,
   ) {
     final List<(String, DateTime?, String?)> items = updates
-        .map((update) => (update.newStatus, update.createdAt, update.note))
+        .map<(String, DateTime?, String?)>(
+          (update) => (update.newStatus, update.createdAt, update.note),
+        )
         .toList();
     if (ticket.status == TicketStatuses.cancelled &&
         (items.isEmpty || items.first.$1 != ticket.status)) {
@@ -859,7 +1053,8 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
     final shouldCancel = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        icon: const Icon(Icons.warning_amber_rounded, color: AppColors.cancelled),
+        icon:
+            const Icon(Icons.warning_amber_rounded, color: AppColors.cancelled),
         title: const Text('Batalkan tiket?'),
         content: const Text(
           'Tiket tidak akan dihapus, tetapi statusnya berubah menjadi Dibatalkan.',
@@ -903,6 +1098,113 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
       );
     }
   }
+
+  Future<void> _confirmDelete(BuildContext context, Ticket ticket) async {
+    String? reason;
+    if (widget.isAdmin) {
+      final controller = TextEditingController();
+      String? validationError;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            icon: const Icon(Icons.delete_outline, color: AppColors.cancelled),
+            title: const Text('Hapus tiket?'),
+            content: TextField(
+              controller: controller,
+              maxLength: 300,
+              maxLines: 3,
+              decoration: InputDecoration(
+                labelText: 'Alasan penghapusan',
+                errorText: validationError,
+                alignLabelWithHint: true,
+              ),
+              onChanged: (_) {
+                if (validationError != null) {
+                  setDialogState(() => validationError = null);
+                }
+              },
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Kembali'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  if (controller.text.trim().isEmpty) {
+                    setDialogState(
+                        () => validationError = 'Alasan wajib diisi.');
+                    return;
+                  }
+                  Navigator.pop(dialogContext, true);
+                },
+                child: const Text('Ya, Hapus'),
+              ),
+            ],
+          ),
+        ),
+      );
+      reason = controller.text.trim();
+      controller.dispose();
+      if (confirmed != true) return;
+    } else {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          icon: const Icon(Icons.delete_outline, color: AppColors.cancelled),
+          title: const Text('Hapus tiket?'),
+          content: const Text(
+            'Tiket dan riwayatnya dihapus permanen dan tidak bisa dikembalikan.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Kembali'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Ya, Hapus'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    if (!context.mounted) return;
+    await _deleteTicket(ticket, reason ?? '');
+  }
+
+  Future<void> _deleteTicket(Ticket ticket, String reason) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final router = GoRouter.of(context);
+    final provider = context.read<TicketProvider>();
+    final ok = widget.isAdmin
+        ? await provider.deleteTicketAsAdmin(
+            ticket: ticket,
+            admin: context.read<AuthProvider>().user!,
+            reason: reason,
+          )
+        : await provider.deleteOwnTicket(ticket.id);
+    if (!mounted) return;
+    if (ok) {
+      messenger.showSnackBar(
+        SnackBar(
+            content: Text('Tiket ${ticket.ticketNumber} berhasil dihapus')),
+      );
+      router.go(
+          widget.isAdmin ? AppRoutes.adminTickets : AppRoutes.employeeTickets);
+    } else {
+      _showError(
+        context,
+        provider.error,
+        () => _retryDelete(ticket, reason),
+      );
+    }
+  }
+
+  Future<void> _retryDelete(Ticket ticket, String reason) =>
+      _deleteTicket(ticket, reason);
 }
 
 class ProfileScreen extends StatefulWidget {
@@ -1041,7 +1343,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   TextField(
                     controller: _name,
                     textCapitalization: TextCapitalization.words,
-                    decoration: const InputDecoration(labelText: 'Nama lengkap'),
+                    decoration:
+                        const InputDecoration(labelText: 'Nama lengkap'),
                   ),
                   const SizedBox(height: 13),
                   _ReadOnlyValue(label: 'Email perusahaan', value: user.email),
@@ -1049,7 +1352,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const SizedBox(height: 13),
                     TextField(
                       controller: _department,
-                      decoration: const InputDecoration(labelText: 'Departemen'),
+                      decoration:
+                          const InputDecoration(labelText: 'Departemen'),
                     ),
                   ],
                   const SizedBox(height: 13),
@@ -1371,7 +1675,8 @@ class _TimelineItem extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(status, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  Text(status,
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 3),
                   Text(
                     formatIndonesianDate(time),
@@ -1478,7 +1783,8 @@ class _AdminActionCardState extends State<_AdminActionCard> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          icon: const Icon(Icons.check_circle_outline, color: AppColors.completed),
+          icon: const Icon(Icons.check_circle_outline,
+              color: AppColors.completed),
           title: const Text('Selesaikan tiket?'),
           content: const Text(
             'Pastikan kendala pengguna sudah terselesaikan sebelum melanjutkan.',

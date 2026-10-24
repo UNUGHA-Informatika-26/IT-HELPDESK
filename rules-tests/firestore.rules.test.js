@@ -129,6 +129,21 @@ beforeEach(async () => {
         companyId: 'company-2',
       }),
     );
+    await setDoc(
+      doc(db, 'tickets/completed'),
+      waitingTicket({
+        ticketNumber: 'HD-COMPLE',
+        status: 'Selesai',
+      }),
+    );
+    await setDoc(doc(db, 'tickets/ABC123waiting/updates/delete-history'), {
+      adminId: 'admin-1',
+      adminName: 'Budi Santoso',
+      oldStatus: 'Menunggu',
+      newStatus: 'Diproses',
+      note: 'Sedang ditangani',
+      createdAt: new Date(),
+    });
   });
 });
 
@@ -203,14 +218,119 @@ test('employees cannot write ticket status updates', async () => {
   );
 });
 
-test('no one can delete tickets', async () => {
+test('employees can delete their own waiting ticket only', async () => {
   const employeeDb = environment.authenticatedContext('employee-1').firestore();
-  const adminDb = environment.authenticatedContext('admin-1').firestore();
-  const guestDb = environment.unauthenticatedContext().firestore();
+  await assertSucceeds(deleteDoc(doc(employeeDb, 'tickets/ABC123waiting')));
+  await assertFails(deleteDoc(doc(employeeDb, 'tickets/processing')));
+  await assertFails(deleteDoc(doc(employeeDb, 'tickets/other-employee-ticket')));
+});
 
-  await assertFails(deleteDoc(doc(employeeDb, 'tickets/ABC123waiting')));
-  await assertFails(deleteDoc(doc(adminDb, 'tickets/ABC123waiting')));
-  await assertFails(deleteDoc(doc(guestDb, 'tickets/ABC123waiting')));
+test('employees can atomically delete their own ticket and update history', async () => {
+  const db = environment.authenticatedContext('employee-1').firestore();
+  const batch = writeBatch(db);
+  const ticket = doc(db, 'tickets/ABC123waiting');
+  batch.delete(doc(ticket, 'updates/delete-history'));
+  batch.delete(ticket);
+  await assertSucceeds(batch.commit());
+});
+
+test('admins can delete waiting and cancelled tickets in their company', async () => {
+  const db = environment.authenticatedContext('admin-1').firestore();
+  await assertSucceeds(deleteDoc(doc(db, 'tickets/ABC123waiting')));
+  await assertSucceeds(deleteDoc(doc(db, 'tickets/cancelled')));
+});
+
+test('admins cannot delete processing or completed tickets', async () => {
+  const db = environment.authenticatedContext('admin-1').firestore();
+  await assertFails(deleteDoc(doc(db, 'tickets/processing')));
+  await assertFails(deleteDoc(doc(db, 'tickets/completed')));
+});
+
+test('admins cannot delete tickets from another company', async () => {
+  const db = environment.authenticatedContext('admin-2').firestore();
+  await assertFails(deleteDoc(doc(db, 'tickets/ABC123waiting')));
+});
+
+test('guests cannot delete tickets', async () => {
+  const db = environment.unauthenticatedContext().firestore();
+  await assertFails(deleteDoc(doc(db, 'tickets/ABC123waiting')));
+});
+
+test('admin can atomically delete ticket history and create notification', async () => {
+  const db = environment.authenticatedContext('admin-1').firestore();
+  const batch = writeBatch(db);
+  const ticket = doc(db, 'tickets/ABC123waiting');
+  batch.delete(doc(ticket, 'updates/delete-history'));
+  batch.delete(ticket);
+  batch.set(doc(db, 'notifications/deletion-1'), {
+    userId: 'employee-1',
+    companyId: 'company-1',
+    type: 'ticket_deleted',
+    ticketNumber: 'HD-ABC123',
+    ticketTitle: 'Printer tidak mencetak',
+    reason: 'Tiket duplikat.',
+    adminName: 'Budi Santoso',
+    createdAt: serverTimestamp(),
+    read: false,
+  });
+  await assertSucceeds(batch.commit());
+});
+
+test('employees cannot create notifications', async () => {
+  const db = environment.authenticatedContext('employee-1').firestore();
+  await assertFails(
+    setDoc(doc(db, 'notifications/fake'), {
+      userId: 'employee-1',
+      companyId: 'company-1',
+      type: 'ticket_deleted',
+      ticketNumber: 'HD-ABC123',
+      ticketTitle: 'Printer tidak mencetak',
+      reason: 'Alasan.',
+      adminName: 'Ayu Lestari',
+      createdAt: serverTimestamp(),
+      read: false,
+    }),
+  );
+});
+
+test('employees can only read and mark their own notifications as read', async () => {
+  await environment.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await setDoc(doc(db, 'notifications/employee-1-notification'), {
+      userId: 'employee-1', companyId: 'company-1', read: false,
+    });
+    await setDoc(doc(db, 'notifications/employee-2-notification'), {
+      userId: 'employee-2', companyId: 'company-1', read: false,
+    });
+  });
+  const db = environment.authenticatedContext('employee-1').firestore();
+  await assertSucceeds(getDoc(doc(db, 'notifications/employee-1-notification')));
+  await assertFails(getDoc(doc(db, 'notifications/employee-2-notification')));
+  await assertSucceeds(
+    updateDoc(doc(db, 'notifications/employee-1-notification'), { read: true }),
+  );
+  await assertFails(
+    updateDoc(doc(db, 'notifications/employee-2-notification'), { read: true }),
+  );
+});
+
+test('admin notifications require a reason from 1 to 300 characters', async () => {
+  const db = environment.authenticatedContext('admin-1').firestore();
+  const notification = (reason) => ({
+    userId: 'employee-1',
+    companyId: 'company-1',
+    type: 'ticket_deleted',
+    ticketNumber: 'HD-ABC123',
+    ticketTitle: 'Printer tidak mencetak',
+    reason,
+    adminName: 'Budi Santoso',
+    createdAt: serverTimestamp(),
+    read: false,
+  });
+  await assertFails(setDoc(doc(db, 'notifications/empty-reason'), notification('')));
+  await assertFails(
+    setDoc(doc(db, 'notifications/long-reason'), notification('x'.repeat(301))),
+  );
 });
 
 test('employees cannot create a profile with the admin role', async () => {

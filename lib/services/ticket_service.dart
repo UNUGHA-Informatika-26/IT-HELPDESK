@@ -86,11 +86,52 @@ class TicketService {
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
-  Future<void> cancelTicket(String ticketId) =>
-      _tickets.doc(ticketId).update({
+  Future<void> cancelTicket(String ticketId) => _tickets.doc(ticketId).update({
         'status': TicketStatuses.cancelled,
         'updatedAt': FieldValue.serverTimestamp(),
       });
+
+  Future<void> deleteOwnTicket(String ticketId) async {
+    final ticketReference = _tickets.doc(ticketId);
+    final updates =
+        await ticketReference.collection(AppConstants.updatesCollection).get();
+    final batch = _firestore.batch();
+    for (final update in updates.docs) {
+      batch.delete(update.reference);
+    }
+    batch.delete(ticketReference);
+    await batch.commit();
+  }
+
+  Future<void> deleteTicketAsAdmin({
+    required Ticket ticket,
+    required AppUser admin,
+    required String reason,
+  }) async {
+    final ticketReference = _tickets.doc(ticket.id);
+    final updates =
+        await ticketReference.collection(AppConstants.updatesCollection).get();
+    final batch = _firestore.batch();
+    for (final update in updates.docs) {
+      batch.delete(update.reference);
+    }
+    batch.delete(ticketReference);
+    batch.set(
+      _firestore.collection(AppConstants.notificationsCollection).doc(),
+      {
+        'userId': ticket.userId,
+        'companyId': admin.companyId,
+        'type': 'ticket_deleted',
+        'ticketNumber': ticket.ticketNumber,
+        'ticketTitle': ticket.title,
+        'reason': reason.trim(),
+        'adminName': admin.name,
+        'createdAt': FieldValue.serverTimestamp(),
+        'read': false,
+      },
+    );
+    await batch.commit();
+  }
 
   Future<void> handleTicket({
     required Ticket ticket,
@@ -106,8 +147,9 @@ class TicketService {
     batch.update(ticketReference, {
       'status': status,
       'updatedAt': FieldValue.serverTimestamp(),
-      'resolvedAt':
-          status == TicketStatuses.completed ? FieldValue.serverTimestamp() : null,
+      'resolvedAt': status == TicketStatuses.completed
+          ? FieldValue.serverTimestamp()
+          : null,
     });
     batch.set(updateReference, {
       'adminId': admin.uid,
@@ -129,8 +171,7 @@ class TicketService {
       userId == null ? 'companyId' : 'userId',
       isEqualTo: userId ?? companyId,
     );
-    final result =
-        await base.where('status', isEqualTo: status).count().get();
+    final result = await base.where('status', isEqualTo: status).count().get();
     final count = result.count;
     if (count == null) {
       throw StateError('Firestore tidak mengembalikan hasil agregasi count.');

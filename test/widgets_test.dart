@@ -43,7 +43,7 @@ void main() {
     await tester.tap(find.text('Masuk'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Email dan password wajib diisi.'), findsOneWidget);
+    expect(find.text('Email wajib diisi.'), findsOneWidget);
     authProvider.dispose();
   });
 

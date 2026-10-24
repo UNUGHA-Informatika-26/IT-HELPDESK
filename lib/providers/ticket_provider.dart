@@ -21,7 +21,8 @@ class TicketProvider extends ChangeNotifier {
   String? get error => _error;
   Map<String, int> get counts => Map.unmodifiable(_counts);
 
-  Stream<List<Ticket>> watchTickets(AppUser user) => _ticketService.watchTickets(
+  Stream<List<Ticket>> watchTickets(AppUser user) =>
+      _ticketService.watchTickets(
         userId: user.isAdmin ? null : user.uid,
         companyId: user.companyId,
       );
@@ -96,6 +97,22 @@ class TicketProvider extends ChangeNotifier {
 
   Future<bool> cancelTicket(String ticketId) =>
       _mutate(() => _ticketService.cancelTicket(ticketId));
+
+  Future<bool> deleteOwnTicket(String ticketId) =>
+      _mutate(() => _ticketService.deleteOwnTicket(ticketId));
+
+  Future<bool> deleteTicketAsAdmin({
+    required Ticket ticket,
+    required AppUser admin,
+    required String reason,
+  }) =>
+      _mutate(
+        () => _ticketService.deleteTicketAsAdmin(
+          ticket: ticket,
+          admin: admin,
+          reason: reason,
+        ),
+      );
 
   Future<bool> handleTicket({
     required Ticket ticket,

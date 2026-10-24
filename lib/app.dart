@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import 'core/theme/app_theme.dart';
 import 'providers/auth_provider.dart';
+import 'providers/notification_provider.dart';
 import 'providers/ticket_provider.dart';
 import 'router.dart';
 
@@ -17,6 +18,7 @@ class HelpdeskApp extends StatefulWidget {
 class _HelpdeskAppState extends State<HelpdeskApp> {
   late final AuthProvider _authProvider;
   late final TicketProvider _ticketProvider;
+  late final NotificationProvider _notificationProvider;
   late final router = createAppRouter(_authProvider);
 
   @override
@@ -24,11 +26,13 @@ class _HelpdeskAppState extends State<HelpdeskApp> {
     super.initState();
     _authProvider = AuthProvider();
     _ticketProvider = TicketProvider();
+    _notificationProvider = NotificationProvider(authProvider: _authProvider);
   }
 
   @override
   void dispose() {
     router.dispose();
+    _notificationProvider.dispose();
     _ticketProvider.dispose();
     _authProvider.dispose();
     super.dispose();
@@ -39,6 +43,9 @@ class _HelpdeskAppState extends State<HelpdeskApp> {
         providers: [
           ChangeNotifierProvider<AuthProvider>.value(value: _authProvider),
           ChangeNotifierProvider<TicketProvider>.value(value: _ticketProvider),
+          ChangeNotifierProvider<NotificationProvider>.value(
+            value: _notificationProvider,
+          ),
         ],
         child: MaterialApp.router(
           title: 'IT Helpdesk',

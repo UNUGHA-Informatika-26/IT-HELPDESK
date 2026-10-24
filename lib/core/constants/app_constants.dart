@@ -5,6 +5,7 @@ abstract final class AppConstants {
   static const usersCollection = 'users';
   static const ticketsCollection = 'tickets';
   static const updatesCollection = 'updates';
+  static const notificationsCollection = 'notifications';
   static const maxTicketTitleLength = 100;
   static const maxTicketDescriptionLength = 1000;
   static const minimumPasswordLength = 8;
@@ -56,6 +57,7 @@ abstract final class AppRoutes {
   static const accessDenied = '/access-denied';
   static const employeeHome = '/employee';
   static const employeeTickets = '/employee/tickets';
+  static const employeeNotifications = '/employee/notifications';
   static const createTicket = '/employee/tickets/new';
   static const employeeTicketDetail = '/employee/tickets/:ticketId';
   static const editTicket = '/employee/tickets/:ticketId/edit';

@@ -6,3 +6,5 @@
 - Statistik ringkasan menggunakan Firestore aggregate `count()` per status. Pencarian tiket dan hitung kategori laporan dilakukan pada data yang sudah dimuat.
 - Rentang tanggal laporan inklusif pada tanggal akhir; query Firestore menggunakan batas atas eksklusif pada tengah malam setelah tanggal akhir.
 - Profil pengguna yang hilang atau memiliki role di luar `user`/`admin` ditolak aksesnya dan sesi Auth dibersihkan; Rules tetap menjadi batas keamanan utama.
+- Karyawan hanya dapat menghapus tiket miliknya berstatus Menunggu. Admin hanya dapat menghapus tiket satu perusahaan berstatus Menunggu atau Dibatalkan dan wajib memberi alasan 1–300 karakter; tiket Diproses/Selesai dipertahankan agar riwayat dan laporan utuh.
+- Penghapusan tiket menghapus seluruh subkoleksi `updates` secara permanen. Penghapusan oleh admin membuat pemberitahuan dalam aplikasi untuk pemilik tiket; tidak ada push notification atau Cloud Functions.

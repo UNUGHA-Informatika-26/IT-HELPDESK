@@ -103,7 +103,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<bool> signIn(String email, String password) async {
-    _status = AuthStatus.checking;
+    // LoginCubit tracks the in-flight request; keep the login route active.
     _error = null;
     notifyListeners();
     try {

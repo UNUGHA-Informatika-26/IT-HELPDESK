@@ -76,6 +76,10 @@ GoRouter createAppRouter(AuthProvider authProvider) => GoRouter(
           builder: (context, state) => const EmployeeTicketsScreen(),
         ),
         GoRoute(
+          path: AppRoutes.employeeNotifications,
+          builder: (context, state) => const NotificationsScreen(),
+        ),
+        GoRoute(
           path: AppRoutes.createTicket,
           builder: (context, state) => const CreateTicketScreen(),
         ),
@@ -94,8 +98,7 @@ GoRouter createAppRouter(AuthProvider authProvider) => GoRouter(
         ),
         GoRoute(
           path: AppRoutes.employeeProfile,
-          builder: (context, state) =>
-              const ProfileScreen(isAdmin: false),
+          builder: (context, state) => const ProfileScreen(isAdmin: false),
         ),
         GoRoute(
           path: AppRoutes.adminHome,
