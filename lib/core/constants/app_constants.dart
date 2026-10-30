@@ -9,6 +9,8 @@ abstract final class AppConstants {
   static const maxTicketTitleLength = 100;
   static const maxTicketDescriptionLength = 1000;
   static const minimumPasswordLength = 8;
+  static final emailVerificationEnforcedFrom =
+      DateTime.utc(2026, 10, 29, 15, 30);
 }
 
 abstract final class UserRoles {

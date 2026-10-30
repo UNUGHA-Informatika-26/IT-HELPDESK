@@ -105,6 +105,154 @@ void main() {
     authProvider.dispose();
   });
 
+  testWidgets('Login password visibility toggles without losing input or focus',
+      (tester) async {
+    final authProvider = AuthProvider.forTesting();
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AuthProvider>.value(
+        value: authProvider,
+        child: const MaterialApp(home: LoginScreen()),
+      ),
+    );
+
+    final passwordFinder = find.byKey(const ValueKey('login-password'));
+    bool isObscured() => tester
+        .widget<EditableText>(
+          find.descendant(
+            of: passwordFinder,
+            matching: find.byType(EditableText),
+          ),
+        )
+        .obscureText;
+
+    await tester.enterText(passwordFinder, 'my-password');
+    final controller = tester.widget<TextFormField>(passwordFinder).controller!;
+    final selection = controller.selection;
+    expect(isObscured(), isTrue);
+    expect(
+      tester
+          .widget<EditableText>(find.descendant(
+            of: passwordFinder,
+            matching: find.byType(EditableText),
+          ))
+          .focusNode
+          .hasFocus,
+      isTrue,
+    );
+
+    await tester.tap(
+      find.descendant(
+        of: passwordFinder,
+        matching: find.byTooltip('Tampilkan password'),
+      ),
+    );
+    await tester.pump();
+
+    expect(isObscured(), isFalse);
+    expect(controller.text, 'my-password');
+    expect(controller.selection, selection);
+    expect(
+      tester
+          .widget<EditableText>(find.descendant(
+            of: passwordFinder,
+            matching: find.byType(EditableText),
+          ))
+          .focusNode
+          .hasFocus,
+      isTrue,
+    );
+
+    await tester.tap(
+      find.descendant(
+        of: passwordFinder,
+        matching: find.byTooltip('Sembunyikan password'),
+      ),
+    );
+    await tester.pump();
+    expect(isObscured(), isTrue);
+    authProvider.dispose();
+  });
+
+  testWidgets('Registration password fields toggle independently',
+      (tester) async {
+    final authProvider = AuthProvider.forTesting();
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AuthProvider>.value(
+        value: authProvider,
+        child: const MaterialApp(home: RegisterEmployeeScreen()),
+      ),
+    );
+
+    final passwordFinder = find.byKey(const ValueKey('register-password'));
+    final confirmFinder =
+        find.byKey(const ValueKey('register-confirm-password'));
+    bool isObscured(Finder fieldFinder) => tester
+        .widget<EditableText>(
+          find.descendant(
+            of: fieldFinder,
+            matching: find.byType(EditableText),
+          ),
+        )
+        .obscureText;
+
+    await tester.enterText(passwordFinder, 'employee-password');
+    await tester.enterText(confirmFinder, 'employee-password');
+
+    expect(isObscured(passwordFinder), isTrue);
+    expect(isObscured(confirmFinder), isTrue);
+    await tester.tap(
+      find.descendant(
+        of: passwordFinder,
+        matching: find.byTooltip('Tampilkan password'),
+      ),
+    );
+    await tester.pump();
+
+    expect(isObscured(passwordFinder), isFalse);
+    expect(isObscured(confirmFinder), isTrue);
+    await tester.tap(
+      find.descendant(
+        of: confirmFinder,
+        matching: find.byTooltip('Tampilkan password'),
+      ),
+    );
+    await tester.pump();
+
+    expect(isObscured(confirmFinder), isFalse);
+    expect(isObscured(passwordFinder), isFalse);
+    await tester.tap(
+      find.descendant(
+        of: passwordFinder,
+        matching: find.byTooltip('Sembunyikan password'),
+      ),
+    );
+    await tester.pump();
+    expect(isObscured(passwordFinder), isTrue);
+    expect(isObscured(confirmFinder), isFalse);
+    authProvider.dispose();
+  });
+
+  testWidgets('Login and registration use the Email label', (tester) async {
+    final authProvider = AuthProvider.forTesting();
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AuthProvider>.value(
+        value: authProvider,
+        child: const MaterialApp(home: LoginScreen()),
+      ),
+    );
+
+    expect(find.text('Email'), findsOneWidget);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AuthProvider>.value(
+        value: authProvider,
+        child: const MaterialApp(home: RegisterEmployeeScreen()),
+      ),
+    );
+    expect(find.text('Email'), findsOneWidget);
+    authProvider.dispose();
+  });
+
   testWidgets('StatusChip displays the selected status', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(home: StatusChip(status: TicketStatuses.inProgress)),

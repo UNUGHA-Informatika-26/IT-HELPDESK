@@ -52,12 +52,75 @@ void main() {
       when(() => authProvider.signIn('ayu@example.com', 'password123'))
           .thenAnswer((_) async => false);
       when(() => authProvider.error).thenReturn('Password salah.');
+      when(() => authProvider.needsVerification).thenReturn(false);
       return LoginCubit(authProvider);
     },
     act: (cubit) => cubit.login('ayu@example.com', 'password123'),
     expect: () => [
       const LoginLoading(),
       const LoginFailure(message: 'Password salah.'),
+    ],
+  );
+
+  blocTest<LoginCubit, LoginState>(
+    'marks login failure when email verification is required',
+    build: () {
+      when(() => authProvider.signIn('ayu@example.com', 'password123'))
+          .thenAnswer((_) async => false);
+      when(() => authProvider.error).thenReturn(
+        'Email belum diverifikasi. Periksa kotak masuk atau Spam, atau '
+        'kirim ulang email verifikasi.',
+      );
+      when(() => authProvider.needsVerification).thenReturn(true);
+      return LoginCubit(authProvider);
+    },
+    act: (cubit) => cubit.login('ayu@example.com', 'password123'),
+    expect: () => [
+      const LoginLoading(),
+      const LoginFailure(
+        message:
+            'Email belum diverifikasi. Periksa kotak masuk atau Spam, atau '
+            'kirim ulang email verifikasi.',
+        needsVerification: true,
+      ),
+    ],
+  );
+
+  blocTest<LoginCubit, LoginState>(
+    'emits info after verification email is resent',
+    build: () {
+      when(
+        () => authProvider.resendVerification('ayu@example.com', 'password123'),
+      ).thenAnswer((_) async => true);
+      return LoginCubit(authProvider);
+    },
+    act: (cubit) => cubit.resendVerification('ayu@example.com', 'password123'),
+    expect: () => [
+      const LoginLoading(),
+      const LoginInfo(
+        message: 'Email verifikasi berhasil dikirim ulang. Periksa kotak '
+            'masuk atau folder Spam.',
+      ),
+    ],
+  );
+
+  blocTest<LoginCubit, LoginState>(
+    'emits failure when verification email resend fails',
+    build: () {
+      when(
+        () => authProvider.resendVerification('ayu@example.com', 'password123'),
+      ).thenAnswer((_) async => false);
+      when(() => authProvider.error).thenReturn(
+        'Terlalu sering meminta email. Coba lagi beberapa menit lagi.',
+      );
+      return LoginCubit(authProvider);
+    },
+    act: (cubit) => cubit.resendVerification('ayu@example.com', 'password123'),
+    expect: () => [
+      const LoginLoading(),
+      const LoginFailure(
+        message: 'Terlalu sering meminta email. Coba lagi beberapa menit lagi.',
+      ),
     ],
   );
 }

@@ -40,14 +40,26 @@ final class LoginFailure extends LoginState {
     required this.message,
     this.emailError,
     this.passwordError,
+    this.needsVerification = false,
   });
 
   final String message;
   final String? emailError;
   final String? passwordError;
+  final bool needsVerification;
 
   @override
-  List<Object?> get props => [message, emailError, passwordError];
+  List<Object?> get props =>
+      [message, emailError, passwordError, needsVerification];
+}
+
+final class LoginInfo extends LoginState {
+  const LoginInfo({required this.message});
+
+  final String message;
+
+  @override
+  List<Object?> get props => [message];
 }
 
 bool _listEquals(List<Object?> first, List<Object?> second) {

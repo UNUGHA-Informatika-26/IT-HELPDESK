@@ -38,13 +38,19 @@ class AuthProvider extends ChangeNotifier {
   AuthStatus _status = AuthStatus.checking;
   AppUser? _user;
   String? _error;
+  String? _infoMessage;
   String _companyName = '';
-  bool _registering = false;
+  bool _suppressAuthChanges = false;
+  bool _needsVerification = false;
+  bool _canResendVerification = false;
 
   AuthStatus get status => _status;
   AppUser? get user => _user;
   String? get error => _error;
+  String? get infoMessage => _infoMessage;
   String get companyName => _companyName;
+  bool get needsVerification => _needsVerification;
+  bool get canResendVerification => _canResendVerification;
   bool get isChecking => _status == AuthStatus.checking;
   bool get isSignedIn => _status == AuthStatus.signedIn && _user != null;
 
@@ -55,8 +61,14 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void clearInfo() {
+    if (_infoMessage == null) return;
+    _infoMessage = null;
+    notifyListeners();
+  }
+
   Future<void> _handleAuthChanged(User? firebaseUser) async {
-    if (_registering) return;
+    if (_suppressAuthChanges) return;
     if (firebaseUser == null) {
       _user = null;
       _companyName = '';
@@ -105,6 +117,9 @@ class AuthProvider extends ChangeNotifier {
   Future<bool> signIn(String email, String password) async {
     // LoginCubit tracks the in-flight request; keep the login route active.
     _error = null;
+    _needsVerification = false;
+    _canResendVerification = false;
+    _suppressAuthChanges = true;
     notifyListeners();
     try {
       final profile = await _authService!.signIn(email, password);
@@ -116,11 +131,15 @@ class AuthProvider extends ChangeNotifier {
     } on HelpdeskException catch (exception) {
       _status = AuthStatus.signedOut;
       _error = exception.message;
+      _needsVerification = exception is EmailNotVerifiedException;
+      _canResendVerification = _needsVerification;
       await _authService!.signOut();
     } on FirebaseException catch (exception) {
       _status = AuthStatus.signedOut;
       _error = firestoreErrorMessage(exception);
       await _authService!.signOut();
+    } finally {
+      _suppressAuthChanges = false;
     }
     notifyListeners();
     return false;
@@ -133,20 +152,30 @@ class AuthProvider extends ChangeNotifier {
     required String department,
     required String companyCode,
   }) async {
-    _status = AuthStatus.checking;
+    _user = null;
+    _companyName = '';
     _error = null;
-    _registering = true;
+    _infoMessage = null;
+    _canResendVerification = false;
+    _suppressAuthChanges = true;
     notifyListeners();
     try {
-      _user = await _authService!.registerEmployee(
+      final result = await _authService!.registerEmployee(
         name: name,
         email: email,
         password: password,
         department: department,
         companyCode: companyCode,
       );
-      _companyName = await _userService!.getCompanyName(_user!.companyId);
-      _status = AuthStatus.signedIn;
+      _user = null;
+      _companyName = '';
+      _status = AuthStatus.signedOut;
+      _canResendVerification = !result.verificationSent;
+      _infoMessage = result.verificationSent
+          ? 'Akun dibuat. Kami mengirim email verifikasi ke ${result.employee.email}. '
+              'Buka email tersebut (cek juga folder Spam), lalu masuk.'
+          : 'Akun dibuat, tetapi email verifikasi belum dapat dikirim. '
+              'Masuk dengan email dan password lalu pilih "Kirim ulang email verifikasi".';
       notifyListeners();
       return true;
     } on HelpdeskException catch (exception) {
@@ -158,7 +187,27 @@ class AuthProvider extends ChangeNotifier {
       _error = firestoreErrorMessage(exception);
       await _authService!.signOut();
     } finally {
-      _registering = false;
+      _suppressAuthChanges = false;
+    }
+    notifyListeners();
+    return false;
+  }
+
+  Future<bool> resendVerification(String email, String password) async {
+    _error = null;
+    _needsVerification = false;
+    _suppressAuthChanges = true;
+    notifyListeners();
+    try {
+      await _authService!.resendVerification(email, password);
+      _canResendVerification = false;
+      return true;
+    } on HelpdeskException catch (exception) {
+      _error = exception.message;
+    } on FirebaseException catch (exception) {
+      _error = firestoreErrorMessage(exception);
+    } finally {
+      _suppressAuthChanges = false;
     }
     notifyListeners();
     return false;

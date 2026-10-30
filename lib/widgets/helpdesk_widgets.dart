@@ -14,10 +14,22 @@ class StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (foreground, background) = switch (status) {
-      TicketStatuses.waiting => (const Color(0xFFB76500), AppColors.waitingSoft),
-      TicketStatuses.inProgress => (AppColors.inProgress, AppColors.inProgressSoft),
-      TicketStatuses.completed => (AppColors.completed, AppColors.completedSoft),
-      TicketStatuses.cancelled => (AppColors.cancelled, AppColors.cancelledSoft),
+      TicketStatuses.waiting => (
+          const Color(0xFFB76500),
+          AppColors.waitingSoft
+        ),
+      TicketStatuses.inProgress => (
+          AppColors.inProgress,
+          AppColors.inProgressSoft
+        ),
+      TicketStatuses.completed => (
+          AppColors.completed,
+          AppColors.completedSoft
+        ),
+      TicketStatuses.cancelled => (
+          AppColors.cancelled,
+          AppColors.cancelledSoft
+        ),
       _ => (AppColors.muted, const Color(0xFFEDF2F7)),
     };
     return Container(
@@ -46,12 +58,18 @@ class PriorityBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (foreground, background) = switch (priority) {
-      TicketPriorities.emergency =>
-        (AppColors.cancelled, AppColors.cancelledSoft),
-      TicketPriorities.urgent =>
-        (const Color(0xFFAD6309), AppColors.waitingSoft),
-      TicketPriorities.normal =>
-        (const Color(0xFF60738D), const Color(0xFFEDF2F7)),
+      TicketPriorities.emergency => (
+          AppColors.cancelled,
+          AppColors.cancelledSoft
+        ),
+      TicketPriorities.urgent => (
+          const Color(0xFFAD6309),
+          AppColors.waitingSoft
+        ),
+      TicketPriorities.normal => (
+          const Color(0xFF60738D),
+          const Color(0xFFEDF2F7)
+        ),
       _ => (AppColors.muted, const Color(0xFFEDF2F7)),
     };
     return Container(
@@ -70,6 +88,78 @@ class PriorityBadge extends StatelessWidget {
       ),
     );
   }
+}
+
+class PasswordField extends StatefulWidget {
+  const PasswordField({
+    super.key,
+    required this.controller,
+    required this.label,
+    this.validator,
+    this.textInputAction,
+    this.onFieldSubmitted,
+    this.autofillHints,
+    this.enabled = true,
+    this.onChanged,
+    this.fieldKey,
+    this.hint,
+    this.errorText,
+    this.prefixIcon,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final FormFieldValidator<String>? validator;
+  final TextInputAction? textInputAction;
+  final ValueChanged<String>? onFieldSubmitted;
+  final Iterable<String>? autofillHints;
+  final bool enabled;
+  final ValueChanged<String>? onChanged;
+  final Key? fieldKey;
+  final String? hint;
+  final String? errorText;
+  final Widget? prefixIcon;
+
+  @override
+  State<PasswordField> createState() => _PasswordFieldState();
+}
+
+class _PasswordFieldState extends State<PasswordField> {
+  bool _isVisible = false;
+
+  @override
+  Widget build(BuildContext context) => TextFormField(
+        key: widget.fieldKey,
+        controller: widget.controller,
+        enabled: widget.enabled,
+        obscureText: !_isVisible,
+        validator: widget.validator,
+        textInputAction: widget.textInputAction,
+        onFieldSubmitted: widget.onFieldSubmitted,
+        autofillHints: widget.autofillHints,
+        onChanged: widget.onChanged,
+        decoration: InputDecoration(
+          labelText: widget.label,
+          hintText: widget.hint,
+          errorText: widget.errorText,
+          prefixIcon: widget.prefixIcon,
+          suffixIcon: Focus(
+            canRequestFocus: false,
+            child: IconButton(
+              tooltip:
+                  _isVisible ? 'Sembunyikan password' : 'Tampilkan password',
+              onPressed: widget.enabled
+                  ? () => setState(() => _isVisible = !_isVisible)
+                  : null,
+              icon: Icon(
+                _isVisible
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+              ),
+            ),
+          ),
+        ),
+      );
 }
 
 class TicketCard extends StatelessWidget {
@@ -355,16 +445,25 @@ class TicketBottomNavigation extends StatelessWidget {
     final items = isAdmin
         ? [
             (AppRoutes.adminHome, Icons.home_outlined, 'Dashboard'),
-            (AppRoutes.adminTickets, Icons.confirmation_number_outlined, 'Semua Tiket'),
+            (
+              AppRoutes.adminTickets,
+              Icons.confirmation_number_outlined,
+              'Semua Tiket'
+            ),
             (AppRoutes.reports, Icons.bar_chart_outlined, 'Laporan'),
             (AppRoutes.adminProfile, Icons.person_outline, 'Profil'),
           ]
         : [
             (AppRoutes.employeeHome, Icons.home_outlined, 'Beranda'),
-            (AppRoutes.employeeTickets, Icons.confirmation_number_outlined, 'Tiket Saya'),
+            (
+              AppRoutes.employeeTickets,
+              Icons.confirmation_number_outlined,
+              'Tiket Saya'
+            ),
             (AppRoutes.employeeProfile, Icons.person_outline, 'Profil'),
           ];
-    final selected = items.indexWhere((item) => currentPath.startsWith(item.$1));
+    final selected =
+        items.indexWhere((item) => currentPath.startsWith(item.$1));
     return NavigationBar(
       selectedIndex: selected < 0 ? 0 : selected,
       onDestinationSelected: (index) => context.go(items[index].$1),

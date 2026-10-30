@@ -43,6 +43,16 @@ class AuthService {
         await _auth.signOut();
         throw const HelpdeskException('Profil pengguna tidak valid.');
       }
+      if (mustVerifyEmail(
+        role: user.role,
+        creationTime: credentialUser.metadata.creationTime,
+      )) {
+        await credentialUser.reload();
+        if (!(_auth.currentUser ?? credentialUser).emailVerified) {
+          await _auth.signOut();
+          throw const EmailNotVerifiedException();
+        }
+      }
       return user;
     } on FirebaseAuthException catch (error) {
       throw HelpdeskException(authErrorMessage(error));
@@ -61,7 +71,7 @@ class AuthService {
     return snapshot.exists && data != null ? AppUser.fromMap(uid, data) : null;
   }
 
-  Future<AppUser> registerEmployee({
+  Future<RegistrationResult> registerEmployee({
     required String name,
     required String email,
     required String password,
@@ -115,7 +125,18 @@ class AuthService {
         await authUser.delete();
         rethrow;
       }
-      return employee;
+      var verificationSent = true;
+      try {
+        await authUser.sendEmailVerification();
+      } on FirebaseAuthException {
+        verificationSent = false;
+      } finally {
+        await _auth.signOut();
+      }
+      return RegistrationResult(
+        employee: employee,
+        verificationSent: verificationSent,
+      );
     } on FirebaseAuthException catch (error) {
       throw HelpdeskException(authErrorMessage(error));
     } on FirebaseException catch (error) {
@@ -131,5 +152,52 @@ class AuthService {
     }
   }
 
+  Future<void> resendVerification(String email, String password) async {
+    var signedIn = false;
+    try {
+      final result = await _auth.signInWithEmailAndPassword(
+        email: email.trim(),
+        password: password,
+      );
+      signedIn = true;
+      final user = result.user;
+      if (user == null) {
+        throw const HelpdeskException('Profil pengguna tidak ditemukan.');
+      }
+      await user.sendEmailVerification();
+    } on FirebaseAuthException catch (error) {
+      throw HelpdeskException(authErrorMessage(error));
+    } finally {
+      if (signedIn) await _auth.signOut();
+    }
+  }
+
   Future<void> signOut() => _auth.signOut();
+}
+
+bool requiresEmailVerification(DateTime? creationTime) =>
+    creationTime?.isAfter(AppConstants.emailVerificationEnforcedFrom) ?? false;
+
+bool mustVerifyEmail({
+  required String role,
+  required DateTime? creationTime,
+}) =>
+    role == UserRoles.employee && requiresEmailVerification(creationTime);
+
+class RegistrationResult {
+  const RegistrationResult({
+    required this.employee,
+    required this.verificationSent,
+  });
+
+  final AppUser employee;
+  final bool verificationSent;
+}
+
+class EmailNotVerifiedException extends HelpdeskException {
+  const EmailNotVerifiedException()
+      : super(
+          'Email belum diverifikasi. Periksa kotak masuk atau Spam, atau '
+          'kirim ulang email verifikasi.',
+        );
 }

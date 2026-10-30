@@ -6,6 +6,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/form_validators.dart';
 import '../../providers/auth_provider.dart';
+import '../../widgets/helpdesk_widgets.dart';
 import 'cubit/login_cubit.dart';
 import 'cubit/login_state.dart';
 
@@ -261,7 +262,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  bool _passwordVisible = false;
 
   @override
   void dispose() {
@@ -274,14 +274,37 @@ class _LoginScreenState extends State<LoginScreen> {
       .read<LoginCubit>()
       .login(_emailController.text.trim(), _passwordController.text);
 
+  void _resendVerification(BuildContext context) =>
+      context.read<LoginCubit>().resendVerification(
+          _emailController.text.trim(), _passwordController.text);
+
   @override
   Widget build(BuildContext context) => BlocProvider<LoginCubit>(
         create: (context) => LoginCubit(context.read<AuthProvider>()),
         child: BlocConsumer<LoginCubit, LoginState>(
-          listener: (context, state) {},
+          listener: (context, state) {
+            if (state is LoginInfo) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  backgroundColor: AppColors.completedSoft,
+                  content: Text(
+                    state.message,
+                    style: const TextStyle(color: AppColors.completed),
+                  ),
+                ),
+              );
+            }
+          },
           builder: (context, state) {
             final failure = state is LoginFailure ? state : null;
             final isLoading = state is LoginLoading;
+            final authProvider = context.watch<AuthProvider>();
+            final infoMessage = authProvider.infoMessage;
+            if (infoMessage != null) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) authProvider.clearInfo();
+              });
+            }
             return Scaffold(
               body: SafeArea(
                 child: Center(
@@ -311,6 +334,25 @@ class _LoginScreenState extends State<LoginScreen> {
                               style: TextStyle(color: AppColors.muted),
                             ),
                             const SizedBox(height: 24),
+                            if (infoMessage != null) ...[
+                              DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: AppColors.completedSoft,
+                                  borderRadius: BorderRadius.circular(11),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Text(
+                                    infoMessage,
+                                    style: const TextStyle(
+                                      color: AppColors.completed,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                            ],
                             TextFormField(
                               key: const ValueKey('login-email'),
                               controller: _emailController,
@@ -326,35 +368,36 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                             ),
                             const SizedBox(height: 14),
-                            TextFormField(
-                              key: const ValueKey('login-password'),
+                            PasswordField(
+                              fieldKey: const ValueKey('login-password'),
                               controller: _passwordController,
+                              label: 'Password',
                               enabled: !isLoading,
-                              obscureText: !_passwordVisible,
+                              textInputAction: TextInputAction.done,
+                              autofillHints: const [AutofillHints.password],
                               onChanged: (_) =>
                                   context.read<LoginCubit>().reset(),
                               onFieldSubmitted: (_) => _submit(context),
-                              decoration: InputDecoration(
-                                labelText: 'Password',
-                                prefixIcon: const Icon(Icons.lock_outline),
-                                errorText: failure?.passwordError,
-                                suffixIcon: IconButton(
-                                  tooltip: 'Tampilkan password',
-                                  onPressed: () => setState(
-                                    () => _passwordVisible = !_passwordVisible,
-                                  ),
-                                  icon: Icon(
-                                    _passwordVisible
-                                        ? Icons.visibility_off_outlined
-                                        : Icons.visibility_outlined,
-                                  ),
-                                ),
-                              ),
+                              errorText: failure?.passwordError,
+                              prefixIcon: const Icon(Icons.lock_outline),
                             ),
                             if (failure?.message.isNotEmpty == true) ...[
                               const SizedBox(height: 12),
                               _InlineError(text: failure!.message),
                             ],
+                            if (failure?.needsVerification == true ||
+                                authProvider.canResendVerification)
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: TextButton(
+                                  onPressed: isLoading
+                                      ? null
+                                      : () => _resendVerification(context),
+                                  child: const Text(
+                                    'Kirim ulang email verifikasi',
+                                  ),
+                                ),
+                              ),
                             Align(
                               alignment: Alignment.centerRight,
                               child: TextButton(
@@ -462,14 +505,16 @@ class _RegisterEmployeeScreenState extends State<RegisterEmployeeScreen> {
       return;
     }
     setState(() => _busy = true);
-    await context.read<AuthProvider>().registerEmployee(
+    final success = await context.read<AuthProvider>().registerEmployee(
           name: _name.text,
           email: _email.text,
           password: _password.text,
           department: _department.text,
           companyCode: _companyCode.text,
         );
-    if (mounted) setState(() => _busy = false);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (success) context.go(AppRoutes.login);
   }
 
   @override
@@ -502,21 +547,28 @@ class _RegisterEmployeeScreenState extends State<RegisterEmployeeScreen> {
               const SizedBox(height: 12),
               _EntryField(
                 controller: _email,
-                label: 'Email perusahaan',
+                label: 'Email',
                 keyboardType: TextInputType.emailAddress,
               ),
               const SizedBox(height: 12),
-              _EntryField(
+              PasswordField(
+                fieldKey: const ValueKey('register-password'),
                 controller: _password,
                 label: 'Password',
                 hint: 'Minimal 8 karakter',
-                obscureText: true,
+                enabled: !_busy,
+                textInputAction: TextInputAction.next,
+                autofillHints: const [AutofillHints.newPassword],
+                validator: FormValidators.password,
               ),
               const SizedBox(height: 12),
-              _EntryField(
+              PasswordField(
+                fieldKey: const ValueKey('register-confirm-password'),
                 controller: _confirmPassword,
                 label: 'Konfirmasi password',
-                obscureText: true,
+                enabled: !_busy,
+                textInputAction: TextInputAction.next,
+                autofillHints: const [AutofillHints.newPassword],
               ),
               const SizedBox(height: 12),
               _EntryField(
@@ -619,7 +671,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           Text(
             _sent
                 ? 'Instruksi reset password telah dikirim ke email Anda.'
-                : 'Masukkan email perusahaan Anda. Kami akan mengirimkan instruksi reset password.',
+                : 'Masukkan email Anda. Kami akan mengirimkan instruksi reset password.',
             textAlign: TextAlign.center,
             style: const TextStyle(color: AppColors.muted, height: 1.5),
           ),
@@ -627,7 +679,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           if (!_sent) ...[
             _EntryField(
               controller: _email,
-              label: 'Email perusahaan',
+              label: 'Email',
               keyboardType: TextInputType.emailAddress,
             ),
             if (_validationError != null || auth.error != null) ...[
@@ -704,26 +756,21 @@ class _EntryField extends StatelessWidget {
   const _EntryField({
     required this.controller,
     required this.label,
-    this.hint,
     this.keyboardType,
     this.textCapitalization = TextCapitalization.none,
-    this.obscureText = false,
   });
 
   final TextEditingController controller;
   final String label;
-  final String? hint;
   final TextInputType? keyboardType;
   final TextCapitalization textCapitalization;
-  final bool obscureText;
 
   @override
   Widget build(BuildContext context) => TextField(
         controller: controller,
         keyboardType: keyboardType,
         textCapitalization: textCapitalization,
-        obscureText: obscureText,
-        decoration: InputDecoration(labelText: label, hintText: hint),
+        decoration: InputDecoration(labelText: label),
       );
 }
 

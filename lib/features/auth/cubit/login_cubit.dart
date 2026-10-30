@@ -32,6 +32,40 @@ class LoginCubit extends Cubit<LoginState> {
       emit(
         LoginFailure(
           message: _authProvider.error ?? 'Gagal masuk. Silakan coba lagi.',
+          needsVerification: _authProvider.needsVerification,
+        ),
+      );
+    }
+  }
+
+  Future<void> resendVerification(String email, String password) async {
+    final emailError = FormValidators.email(email);
+    final passwordError = FormValidators.password(password);
+    if (emailError != null || passwordError != null) {
+      emit(
+        LoginFailure(
+          message: '',
+          emailError: emailError,
+          passwordError: passwordError,
+        ),
+      );
+      return;
+    }
+
+    emit(const LoginLoading());
+    final sent = await _authProvider.resendVerification(email, password);
+    if (isClosed) return;
+    if (sent) {
+      emit(
+        const LoginInfo(
+          message: 'Email verifikasi berhasil dikirim ulang. Periksa kotak '
+              'masuk atau folder Spam.',
+        ),
+      );
+    } else {
+      emit(
+        LoginFailure(
+          message: _authProvider.error ?? 'Email verifikasi gagal dikirim.',
         ),
       );
     }

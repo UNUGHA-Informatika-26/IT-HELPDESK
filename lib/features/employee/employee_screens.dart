@@ -1347,7 +1347,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         const InputDecoration(labelText: 'Nama lengkap'),
                   ),
                   const SizedBox(height: 13),
-                  _ReadOnlyValue(label: 'Email perusahaan', value: user.email),
+                  _ReadOnlyValue(label: 'Email', value: user.email),
                   if (!widget.isAdmin) ...[
                     const SizedBox(height: 13),
                     TextField(
