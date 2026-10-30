@@ -27,6 +27,37 @@ Ticket _ticket({String status = TicketStatuses.waiting}) => Ticket(
 void main() {
   setUpAll(() => initializeDateFormatting('id_ID'));
 
+  testWidgets('Onboarding fits normal screens and scrolls on short screens',
+      (tester) async {
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    for (final (size, textScale) in [
+      (const Size(360, 640), 1.0),
+      (const Size(400, 498), 1.0),
+      (const Size(400, 498), 1.5),
+    ]) {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = size;
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: TextScaler.linear(textScale)),
+            child: child!,
+          ),
+          home: const OnboardingScreen(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Laporkan kendala dengan mudah'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    }
+  });
+
   testWidgets('Login shows a required-field message for empty inputs',
       (tester) async {
     final authProvider = AuthProvider.forTesting();

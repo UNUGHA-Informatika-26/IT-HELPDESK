@@ -135,96 +135,114 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final slide = _slides[_current];
     return Scaffold(
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(26, 20, 26, 28),
-          child: Column(
-            children: [
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: _finish,
-                  child: const Text('Lewati'),
-                ),
-              ),
-              Expanded(
-                flex: 5,
-                child: Center(
-                  child: Container(
-                    width: 190,
-                    height: 205,
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(32),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x221769E0),
-                          blurRadius: 40,
-                          offset: Offset(0, 14),
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: IntrinsicHeight(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(26, 20, 26, 28),
+                  child: Column(
+                    children: [
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: _finish,
+                          child: const Text('Lewati'),
                         ),
-                      ],
-                    ),
-                    child: Icon(slide.$1, size: 64, color: AppColors.primary),
-                  ),
-                ),
-              ),
-              Expanded(
-                flex: 3,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: List.generate(
-                        _slides.length,
-                        (index) => AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
-                          width: index == _current ? 24 : 7,
-                          height: 7,
-                          margin: const EdgeInsets.symmetric(horizontal: 3),
-                          decoration: BoxDecoration(
-                            color: index == _current
-                                ? AppColors.primary
-                                : const Color(0xFFCDD6E4),
-                            borderRadius: BorderRadius.circular(8),
+                      ),
+                      Expanded(
+                        flex: 5,
+                        child: Center(
+                          child: Container(
+                            width: 190,
+                            height: 205,
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              borderRadius: BorderRadius.circular(32),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Color(0x221769E0),
+                                  blurRadius: 40,
+                                  offset: Offset(0, 14),
+                                ),
+                              ],
+                            ),
+                            child: Icon(
+                              slide.$1,
+                              size: 64,
+                              color: AppColors.primary,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 20),
-                    Text(
-                      slide.$2,
-                      textAlign: TextAlign.center,
-                      style:
-                          Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                fontWeight: FontWeight.w700,
+                      Expanded(
+                        flex: 3,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: List.generate(
+                                _slides.length,
+                                (index) => AnimatedContainer(
+                                  duration: const Duration(milliseconds: 180),
+                                  width: index == _current ? 24 : 7,
+                                  height: 7,
+                                  margin:
+                                      const EdgeInsets.symmetric(horizontal: 3),
+                                  decoration: BoxDecoration(
+                                    color: index == _current
+                                        ? AppColors.primary
+                                        : const Color(0xFFCDD6E4),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
                               ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      slide.$3,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: AppColors.muted,
-                        height: 1.6,
+                            ),
+                            const SizedBox(height: 20),
+                            Text(
+                              slide.$2,
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .headlineSmall
+                                  ?.copyWith(fontWeight: FontWeight.w700),
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              slide.$3,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: AppColors.muted,
+                                height: 1.6,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+                      FilledButton(
+                        onPressed: _current == _slides.length - 1
+                            ? _finish
+                            : () => setState(() => _current++),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              _current == _slides.length - 1
+                                  ? 'Mulai'
+                                  : 'Lanjut',
+                            ),
+                            const SizedBox(width: 8),
+                            const Icon(Icons.arrow_forward, size: 18),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              FilledButton(
-                onPressed: _current == _slides.length - 1
-                    ? _finish
-                    : () => setState(() => _current++),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(_current == _slides.length - 1 ? 'Mulai' : 'Lanjut'),
-                    const SizedBox(width: 8),
-                    const Icon(Icons.arrow_forward, size: 18),
-                  ],
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),

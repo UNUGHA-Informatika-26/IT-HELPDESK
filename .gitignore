@@ -49,3 +49,5 @@ app.*.map.json
 
 flutter_application_1/
 node_modules/
+
+.firebase/
