@@ -262,6 +262,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  String? _successMessage;
 
   @override
   void dispose() {
@@ -270,9 +271,13 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _submit(BuildContext context) => context
-      .read<LoginCubit>()
-      .login(_emailController.text.trim(), _passwordController.text);
+  void _submit(BuildContext context) {
+    setState(() => _successMessage = null);
+    context.read<AuthProvider>().clearInfo();
+    context
+        .read<LoginCubit>()
+        .login(_emailController.text.trim(), _passwordController.text);
+  }
 
   void _resendVerification(BuildContext context) =>
       context.read<LoginCubit>().resendVerification(
@@ -284,15 +289,9 @@ class _LoginScreenState extends State<LoginScreen> {
         child: BlocConsumer<LoginCubit, LoginState>(
           listener: (context, state) {
             if (state is LoginInfo) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  backgroundColor: AppColors.completedSoft,
-                  content: Text(
-                    state.message,
-                    style: const TextStyle(color: AppColors.completed),
-                  ),
-                ),
-              );
+              setState(() => _successMessage = state.message);
+            } else if (state is LoginFailure) {
+              setState(() => _successMessage = null);
             }
           },
           builder: (context, state) {
@@ -300,11 +299,13 @@ class _LoginScreenState extends State<LoginScreen> {
             final isLoading = state is LoginLoading;
             final authProvider = context.watch<AuthProvider>();
             final infoMessage = authProvider.infoMessage;
-            if (infoMessage != null) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) authProvider.clearInfo();
-              });
-            }
+            final errorMessage = failure == null
+                ? null
+                : [
+                    failure.emailError,
+                    failure.passwordError,
+                    if (failure.message.isNotEmpty) failure.message,
+                  ].whereType<String>().join('\n');
             return Scaffold(
               body: SafeArea(
                 child: Center(
@@ -335,21 +336,9 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             const SizedBox(height: 24),
                             if (infoMessage != null) ...[
-                              DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color: AppColors.completedSoft,
-                                  borderRadius: BorderRadius.circular(11),
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: Text(
-                                    infoMessage,
-                                    style: const TextStyle(
-                                      color: AppColors.completed,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ),
+                              AlertBanner(
+                                message: infoMessage,
+                                variant: AlertBannerVariant.success,
                               ),
                               const SizedBox(height: 14),
                             ],
@@ -359,12 +348,14 @@ class _LoginScreenState extends State<LoginScreen> {
                               enabled: !isLoading,
                               keyboardType: TextInputType.emailAddress,
                               textInputAction: TextInputAction.next,
-                              onChanged: (_) =>
-                                  context.read<LoginCubit>().reset(),
+                              onChanged: (_) {
+                                setState(() => _successMessage = null);
+                                authProvider.clearInfo();
+                                context.read<LoginCubit>().reset();
+                              },
                               decoration: InputDecoration(
-                                labelText: 'Email',
+                                label: const RequiredFieldLabel('Email'),
                                 prefixIcon: Icon(Icons.email_outlined),
-                                errorText: failure?.emailError,
                               ),
                             ),
                             const SizedBox(height: 14),
@@ -375,15 +366,24 @@ class _LoginScreenState extends State<LoginScreen> {
                               enabled: !isLoading,
                               textInputAction: TextInputAction.done,
                               autofillHints: const [AutofillHints.password],
-                              onChanged: (_) =>
-                                  context.read<LoginCubit>().reset(),
+                              onChanged: (_) {
+                                setState(() => _successMessage = null);
+                                context.read<LoginCubit>().reset();
+                              },
                               onFieldSubmitted: (_) => _submit(context),
-                              errorText: failure?.passwordError,
                               prefixIcon: const Icon(Icons.lock_outline),
                             ),
-                            if (failure?.message.isNotEmpty == true) ...[
+                            if (errorMessage != null &&
+                                errorMessage.isNotEmpty) ...[
                               const SizedBox(height: 12),
-                              _InlineError(text: failure!.message),
+                              AlertBanner(message: errorMessage),
+                            ],
+                            if (_successMessage != null) ...[
+                              const SizedBox(height: 12),
+                              AlertBanner(
+                                message: _successMessage!,
+                                variant: AlertBannerVariant.success,
+                              ),
                             ],
                             if (failure?.needsVerification == true ||
                                 authProvider.canResendVerification)
@@ -470,6 +470,11 @@ class _RegisterEmployeeScreenState extends State<RegisterEmployeeScreen> {
   bool _busy = false;
   String? _formError;
 
+  void _clearRegistrationError(BuildContext context) {
+    if (_formError != null) setState(() => _formError = null);
+    context.read<AuthProvider>().clearError();
+  }
+
   @override
   void dispose() {
     _name.dispose();
@@ -483,6 +488,7 @@ class _RegisterEmployeeScreenState extends State<RegisterEmployeeScreen> {
 
   Future<void> _submit() async {
     setState(() => _formError = null);
+    context.read<AuthProvider>().clearError();
     if ([
       _name,
       _email,
@@ -494,7 +500,7 @@ class _RegisterEmployeeScreenState extends State<RegisterEmployeeScreen> {
       setState(() => _formError = 'Semua field wajib diisi.');
       return;
     }
-    final emailError = FormValidators.email(_email.text);
+    final emailError = FormValidators.registrationEmail(_email.text);
     final passwordError = FormValidators.password(_password.text);
     if (emailError != null || passwordError != null) {
       setState(() => _formError = emailError ?? passwordError);
@@ -538,16 +544,23 @@ class _RegisterEmployeeScreenState extends State<RegisterEmployeeScreen> {
                     .headlineSmall
                     ?.copyWith(fontWeight: FontWeight.w700),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 8),
+              const Text(
+                '* wajib diisi',
+                style: TextStyle(color: AppColors.muted, fontSize: 12),
+              ),
+              const SizedBox(height: 14),
               _EntryField(
                 controller: _name,
                 label: 'Nama lengkap',
+                onChanged: (_) => _clearRegistrationError(context),
                 textCapitalization: TextCapitalization.words,
               ),
               const SizedBox(height: 12),
               _EntryField(
                 controller: _email,
                 label: 'Email',
+                onChanged: (_) => _clearRegistrationError(context),
                 keyboardType: TextInputType.emailAddress,
               ),
               const SizedBox(height: 12),
@@ -560,6 +573,7 @@ class _RegisterEmployeeScreenState extends State<RegisterEmployeeScreen> {
                 textInputAction: TextInputAction.next,
                 autofillHints: const [AutofillHints.newPassword],
                 validator: FormValidators.password,
+                onChanged: (_) => _clearRegistrationError(context),
               ),
               const SizedBox(height: 12),
               PasswordField(
@@ -569,24 +583,27 @@ class _RegisterEmployeeScreenState extends State<RegisterEmployeeScreen> {
                 enabled: !_busy,
                 textInputAction: TextInputAction.next,
                 autofillHints: const [AutofillHints.newPassword],
+                onChanged: (_) => _clearRegistrationError(context),
               ),
               const SizedBox(height: 12),
               _EntryField(
                 controller: _department,
                 label: 'Departemen',
+                onChanged: (_) => _clearRegistrationError(context),
                 textCapitalization: TextCapitalization.words,
               ),
               const SizedBox(height: 12),
               _EntryField(
                 controller: _companyCode,
                 label: 'Kode perusahaan',
+                onChanged: (_) => _clearRegistrationError(context),
                 textCapitalization: TextCapitalization.characters,
               ),
               if (_formError != null ||
                   context.watch<AuthProvider>().error != null) ...[
                 const SizedBox(height: 12),
-                _InlineError(
-                  text: _formError ?? context.watch<AuthProvider>().error!,
+                AlertBanner(
+                  message: _formError ?? context.watch<AuthProvider>().error!,
                 ),
               ],
               const SizedBox(height: 20),
@@ -620,6 +637,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   }
 
   Future<void> _send() async {
+    context.read<AuthProvider>().clearError();
     final validationError = FormValidators.email(_email.text);
     if (validationError != null) {
       setState(() => _validationError = validationError);
@@ -676,15 +694,26 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
             style: const TextStyle(color: AppColors.muted, height: 1.5),
           ),
           const SizedBox(height: 26),
+          if (_sent) ...[
+            const AlertBanner(
+              message: 'Instruksi reset password berhasil dikirim.',
+              variant: AlertBannerVariant.success,
+            ),
+            const SizedBox(height: 14),
+          ],
           if (!_sent) ...[
             _EntryField(
               controller: _email,
               label: 'Email',
+              onChanged: (_) {
+                setState(() => _validationError = null);
+                auth.clearError();
+              },
               keyboardType: TextInputType.emailAddress,
             ),
             if (_validationError != null || auth.error != null) ...[
               const SizedBox(height: 12),
-              _InlineError(text: _validationError ?? auth.error!),
+              AlertBanner(message: _validationError ?? auth.error!),
             ],
             const SizedBox(height: 18),
             FilledButton(
@@ -758,19 +787,22 @@ class _EntryField extends StatelessWidget {
     required this.label,
     this.keyboardType,
     this.textCapitalization = TextCapitalization.none,
+    this.onChanged,
   });
 
   final TextEditingController controller;
   final String label;
   final TextInputType? keyboardType;
   final TextCapitalization textCapitalization;
+  final ValueChanged<String>? onChanged;
 
   @override
   Widget build(BuildContext context) => TextField(
         controller: controller,
         keyboardType: keyboardType,
         textCapitalization: textCapitalization,
-        decoration: InputDecoration(labelText: label),
+        onChanged: onChanged,
+        decoration: InputDecoration(label: RequiredFieldLabel(label)),
       );
 }
 
@@ -791,42 +823,6 @@ class _AppLogo extends StatelessWidget {
           Icons.headset_mic_outlined,
           color: Colors.white,
           size: size * .52,
-        ),
-      );
-}
-
-class _InlineError extends StatelessWidget {
-  const _InlineError({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => DecoratedBox(
-        decoration: BoxDecoration(
-          color: AppColors.cancelledSoft,
-          borderRadius: BorderRadius.circular(11),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              const Icon(
-                Icons.error_outline,
-                size: 17,
-                color: AppColors.cancelled,
-              ),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(
-                  text,
-                  style: const TextStyle(
-                    color: AppColors.cancelled,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            ],
-          ),
         ),
       );
 }

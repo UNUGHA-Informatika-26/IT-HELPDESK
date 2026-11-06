@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:it_helpdesk_flutter/core/constants/app_constants.dart';
 import 'package:it_helpdesk_flutter/core/utils/form_validators.dart';
 import 'package:it_helpdesk_flutter/models/ticket.dart';
 
@@ -11,10 +12,28 @@ void main() {
       expect(FormValidators.email('ayu@example.com'), isNull);
     });
 
+    test('allows supported registration email domains only', () {
+      expect(FormValidators.registrationEmail('person@gmail.com'), isNull);
+      expect(FormValidators.registrationEmail(' person@Yahoo.com '), isNull);
+      expect(FormValidators.registrationEmail('staff@kampus.ac.id'), isNull);
+
+      for (final domain in [
+        'mailinator.com',
+        '10minutemail.com',
+        'tempmail.com',
+      ]) {
+        expect(
+          FormValidators.registrationEmail('person@$domain'),
+          AppConstants.unsupportedRegistrationEmailMessage,
+        );
+      }
+    });
+
     test('requires passwords of at least eight characters', () {
       expect(FormValidators.password('short'), isNotNull);
       expect(FormValidators.password('long-enough'), isNull);
-      expect(FormValidators.confirmPassword('different', 'password'), isNotNull);
+      expect(
+          FormValidators.confirmPassword('different', 'password'), isNotNull);
       expect(FormValidators.confirmPassword('password', 'password'), isNull);
     });
 

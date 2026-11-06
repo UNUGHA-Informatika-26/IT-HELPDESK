@@ -6,6 +6,203 @@ import '../core/theme/app_theme.dart';
 import '../core/utils/date_formatter.dart';
 import '../models/ticket.dart';
 
+enum AlertBannerVariant { error, success, info }
+
+class AlertBanner extends StatelessWidget {
+  const AlertBanner({
+    super.key,
+    required this.message,
+    this.variant = AlertBannerVariant.error,
+  });
+
+  final String message;
+  final AlertBannerVariant variant;
+
+  @override
+  Widget build(BuildContext context) {
+    final (foreground, background, icon) = switch (variant) {
+      AlertBannerVariant.error => (
+          AppColors.cancelled,
+          AppColors.cancelledSoft,
+          Icons.warning_amber_rounded,
+        ),
+      AlertBannerVariant.success => (
+          AppColors.completed,
+          AppColors.completedSoft,
+          Icons.check_circle_outline,
+        ),
+      AlertBannerVariant.info => (
+          AppColors.primary,
+          AppColors.primarySoft,
+          Icons.info_outline,
+        ),
+    };
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: foreground),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(color: foreground, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class RetryableAlertBanner extends StatelessWidget {
+  const RetryableAlertBanner({
+    super.key,
+    required this.message,
+    required this.onRetry,
+  });
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AlertBanner(message: message),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Coba lagi'),
+            ),
+          ),
+        ],
+      );
+}
+
+class RequiredFieldLabel extends StatelessWidget {
+  const RequiredFieldLabel(
+    this.text, {
+    super.key,
+    this.isRequired = true,
+  });
+
+  final String text;
+  final bool isRequired;
+
+  @override
+  Widget build(BuildContext context) => Text.rich(
+        TextSpan(
+          text: text,
+          children: isRequired
+              ? [
+                  TextSpan(
+                    text: ' *',
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.error),
+                  ),
+                ]
+              : null,
+        ),
+      );
+}
+
+Future<bool?> showConfirmDialog({
+  required BuildContext context,
+  required String title,
+  required String confirmLabel,
+  Widget? content,
+  Widget Function(
+    BuildContext context,
+    String? validationError,
+    VoidCallback clearValidationError,
+  )? contentBuilder,
+  String cancelLabel = 'Kembali',
+  IconData? icon,
+  Color? iconColor,
+  String? Function()? validate,
+}) =>
+    showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        String? validationError;
+        return StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            icon: icon == null ? null : Icon(icon, color: iconColor),
+            title: Text(title),
+            content: contentBuilder?.call(
+                  context,
+                  validationError,
+                  () => setDialogState(() => validationError = null),
+                ) ??
+                content,
+            actions: [
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(dialogContext, false),
+                      child: Text(cancelLabel),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () {
+                        final error = validate?.call();
+                        if (error != null) {
+                          setDialogState(() => validationError = error);
+                          return;
+                        }
+                        Navigator.pop(dialogContext, true);
+                      },
+                      child: Text(confirmLabel),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+class TicketActionButton extends StatelessWidget {
+  const TicketActionButton({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.color = AppColors.primary,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => OutlinedButton.icon(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: color,
+          minimumSize: const Size.fromHeight(48),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          side: BorderSide(color: color),
+        ),
+        icon: Icon(icon),
+        label: Text(label),
+      );
+}
+
 class StatusChip extends StatelessWidget {
   const StatusChip({super.key, required this.status});
 
@@ -139,7 +336,7 @@ class _PasswordFieldState extends State<PasswordField> {
         autofillHints: widget.autofillHints,
         onChanged: widget.onChanged,
         decoration: InputDecoration(
-          labelText: widget.label,
+          label: RequiredFieldLabel(widget.label),
           hintText: widget.hint,
           errorText: widget.errorText,
           prefixIcon: widget.prefixIcon,
@@ -182,86 +379,98 @@ class TicketCard extends StatelessWidget {
           onTap: onTap,
           child: Padding(
             padding: const EdgeInsets.all(15),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        ticket.ticketNumber,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              ticket.ticketNumber,
+                              style: const TextStyle(
+                                color: AppColors.muted,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          PriorityBadge(priority: ticket.priority),
+                          const SizedBox(width: 5),
+                          StatusChip(status: ticket.status),
+                        ],
+                      ),
+                      const SizedBox(height: 11),
+                      Text(
+                        ticket.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          color: AppColors.muted,
-                          fontSize: 10,
+                          fontSize: 14,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                    ),
-                    PriorityBadge(priority: ticket.priority),
-                    const SizedBox(width: 5),
-                    StatusChip(status: ticket.status),
-                  ],
-                ),
-                const SizedBox(height: 11),
-                Text(
-                  ticket.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                if (showReporter) ...[
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.person_outline,
-                        size: 15,
-                        color: AppColors.muted,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        ticket.userName,
-                        style: const TextStyle(
-                          color: AppColors.muted,
-                          fontSize: 11,
+                      if (showReporter) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.person_outline,
+                              size: 15,
+                              color: AppColors.muted,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              ticket.userName,
+                              style: const TextStyle(
+                                color: AppColors.muted,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
                         ),
+                      ],
+                      const SizedBox(height: 11),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              ticket.category,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: AppColors.muted,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            '·',
+                            style: TextStyle(color: AppColors.muted),
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              formatIndonesianDate(ticket.createdAt),
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: AppColors.muted,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                ],
-                const SizedBox(height: 11),
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        ticket.category,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: AppColors.muted,
-                          fontSize: 10,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Text('·', style: TextStyle(color: AppColors.muted)),
-                    const SizedBox(width: 8),
-                    Text(
-                      formatIndonesianDate(ticket.createdAt),
-                      style: const TextStyle(
-                        color: AppColors.muted,
-                        fontSize: 10,
-                      ),
-                    ),
-                    const Spacer(),
-                    const Icon(
-                      Icons.chevron_right,
-                      size: 19,
-                      color: AppColors.muted,
-                    ),
-                  ],
+                ),
+                const SizedBox(width: 8),
+                const Icon(
+                  Icons.chevron_right,
+                  size: 19,
+                  color: AppColors.muted,
                 ),
               ],
             ),
@@ -333,21 +542,19 @@ class TicketPermissionActions extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: OutlinedButton.icon(
+            child: TicketActionButton(
+              label: 'Edit',
+              icon: Icons.edit_outlined,
               onPressed: onEdit,
-              icon: const Icon(Icons.edit_outlined),
-              label: const Text('Edit'),
             ),
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.cancelledSoft,
-                foregroundColor: AppColors.cancelled,
-              ),
+            child: TicketActionButton(
+              label: 'Batalkan',
+              icon: Icons.cancel_outlined,
+              color: AppColors.cancelled,
               onPressed: onCancel,
-              child: const Text('Batalkan'),
             ),
           ),
         ],
@@ -371,9 +578,13 @@ class EmptyState extends StatelessWidget {
   final VoidCallback? onAction;
 
   @override
-  Widget build(BuildContext context) => Padding(
+  Widget build(BuildContext context) => Center(
+          child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             const Icon(
               Icons.inbox_outlined,
@@ -396,7 +607,7 @@ class EmptyState extends StatelessWidget {
             ],
           ],
         ),
-      );
+      ));
 }
 
 class LoadingState extends StatelessWidget {
@@ -434,14 +645,14 @@ class TicketBottomNavigation extends StatelessWidget {
   const TicketBottomNavigation({
     super.key,
     required this.isAdmin,
-    required this.currentPath,
   });
 
   final bool isAdmin;
-  final String currentPath;
 
   @override
   Widget build(BuildContext context) {
+    final currentPath =
+        GoRouter.of(context).routeInformationProvider.value.uri.path;
     final items = isAdmin
         ? [
             (AppRoutes.adminHome, Icons.home_outlined, 'Dashboard'),
@@ -462,8 +673,12 @@ class TicketBottomNavigation extends StatelessWidget {
             ),
             (AppRoutes.employeeProfile, Icons.person_outline, 'Profil'),
           ];
-    final selected =
-        items.indexWhere((item) => currentPath.startsWith(item.$1));
+    final homePath = isAdmin ? AppRoutes.adminHome : AppRoutes.employeeHome;
+    final selected = items.indexWhere(
+      (item) => item.$1 == homePath
+          ? currentPath == homePath
+          : currentPath.startsWith(item.$1),
+    );
     return NavigationBar(
       selectedIndex: selected < 0 ? 0 : selected,
       onDestinationSelected: (index) => context.go(items[index].$1),

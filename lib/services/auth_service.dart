@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../core/constants/app_constants.dart';
+import '../core/utils/form_validators.dart';
 import '../models/app_user.dart';
 import 'firebase_error_messages.dart';
 
@@ -79,6 +80,11 @@ class AuthService {
     required String companyCode,
   }) async {
     try {
+      if (!FormValidators.isAllowedRegistrationEmail(email)) {
+        throw const HelpdeskException(
+          AppConstants.unsupportedRegistrationEmailMessage,
+        );
+      }
       final normalizedCode = companyCode.trim().toUpperCase();
       final codeSnapshot = await _firestore
           .collection(AppConstants.companyCodesCollection)

@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/date_formatter.dart';
+import '../../models/app_user.dart';
 import '../../models/ticket.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/ticket_provider.dart';
@@ -21,22 +22,39 @@ class AdminDashboardScreen extends StatefulWidget {
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Stream<List<Ticket>>? _tickets;
   String? _uid;
-  String? _countSignature;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final user = context.read<AuthProvider>().user!;
+    final user = context.read<AuthProvider>().user;
+    if (user == null) {
+      _uid = null;
+      _tickets = null;
+      return;
+    }
     if (_uid != user.uid) {
       _uid = user.uid;
       _tickets = context.read<TicketProvider>().watchTickets(user);
+      _loadCounts(user);
     }
+  }
+
+  void _loadCounts(AppUser user) {
+    final uid = user.uid;
+    context.read<TicketProvider>().loadCounts(
+          user,
+          isCurrent: () =>
+              mounted && context.read<AuthProvider>().user?.uid == uid,
+        );
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-    final user = auth.user!;
+    final user = auth.user;
+    if (user == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
     final counts = context.watch<TicketProvider>().counts;
     return Scaffold(
       body: SafeArea(
@@ -54,17 +72,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             }
             if (!snapshot.hasData) return const LoadingState();
             final tickets = snapshot.data!;
-            final signature =
-                tickets.map((ticket) => '${ticket.id}:${ticket.status}').join('|');
-            if (_countSignature != signature) {
-              _countSignature = signature;
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) context.read<TicketProvider>().loadCounts(user);
-              });
-            }
             return ListView(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
               children: [
+                if (context.watch<TicketProvider>().countsError != null) ...[
+                  RetryableAlertBanner(
+                    message: context.watch<TicketProvider>().countsError!,
+                    onRetry: () => _loadCounts(user),
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 Row(
                   children: [
                     Expanded(
@@ -130,7 +147,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   ),
                   child: const Row(
                     children: [
-                      Icon(Icons.headset_mic_outlined, color: AppColors.primary),
+                      Icon(Icons.headset_mic_outlined,
+                          color: AppColors.primary),
                       SizedBox(width: 12),
                       Expanded(
                         child: Column(
@@ -157,7 +175,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   ),
                 ),
                 const SectionHeading(title: 'Ringkasan tiket'),
-                                GridView(
+                GridView(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -182,9 +200,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   ),
                 ),
                 if (tickets.isEmpty)
-                  const EmptyState(
-                    title: 'Belum ada tiket',
-                    message: 'Tiket perusahaan akan muncul di sini.',
+                  const SizedBox(
+                    height: 190,
+                    child: EmptyState(
+                      title: 'Belum ada tiket',
+                      message: 'Tiket perusahaan akan muncul di sini.',
+                    ),
                   )
                 else
                   for (final ticket in tickets.take(2)) ...[
@@ -197,15 +218,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     ),
                     const SizedBox(height: 10),
                   ],
-                if (context.watch<TicketProvider>().error != null)
-                  TextButton.icon(
-                    onPressed: () =>
-                        context.read<TicketProvider>().loadCounts(user),
-                    icon: const Icon(Icons.refresh),
-                    label: Text(
-                      '${context.watch<TicketProvider>().error} · Coba lagi',
-                    ),
-                  ),
               ],
             );
           },
@@ -213,7 +225,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       ),
       bottomNavigationBar: const TicketBottomNavigation(
         isAdmin: true,
-        currentPath: AppRoutes.adminHome,
       ),
     );
   }
@@ -235,7 +246,12 @@ class _AdminTicketsScreenState extends State<AdminTicketsScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final user = context.read<AuthProvider>().user!;
+    final user = context.read<AuthProvider>().user;
+    if (user == null) {
+      _uid = null;
+      _tickets = null;
+      return;
+    }
     if (_uid != user.uid) {
       _uid = user.uid;
       _tickets = context.read<TicketProvider>().watchTickets(user);
@@ -250,7 +266,11 @@ class _AdminTicketsScreenState extends State<AdminTicketsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final user = context.read<AuthProvider>().user!;
+    final user = context.watch<AuthProvider>().user;
+    if (user == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    final successMessage = GoRouterState.of(context).extra as String?;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Semua Tiket'),
@@ -285,14 +305,21 @@ class _AdminTicketsScreenState extends State<AdminTicketsScreen> {
           final filtered = snapshot.data!.where((ticket) {
             final statusMatches =
                 _filter == 'Semua' || ticket.status == _filter;
-            final textMatches =
-                ticket.title.toLowerCase().contains(query) ||
-                    ticket.ticketNumber.toLowerCase().contains(query) ||
-                    ticket.userName.toLowerCase().contains(query);
+            final textMatches = ticket.title.toLowerCase().contains(query) ||
+                ticket.ticketNumber.toLowerCase().contains(query) ||
+                ticket.userName.toLowerCase().contains(query);
             return statusMatches && textMatches;
           }).toList();
           return Column(
             children: [
+              if (successMessage != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+                  child: AlertBanner(
+                    message: successMessage,
+                    variant: AlertBannerVariant.success,
+                  ),
+                ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
                 child: TextField(
@@ -307,7 +334,8 @@ class _AdminTicketsScreenState extends State<AdminTicketsScreen> {
               SizedBox(
                 height: 54,
                 child: ListView(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
                   scrollDirection: Axis.horizontal,
                   children: ['Semua', ...TicketStatuses.all]
                       .map(
@@ -316,8 +344,7 @@ class _AdminTicketsScreenState extends State<AdminTicketsScreen> {
                           child: ChoiceChip(
                             label: Text(status),
                             selected: status == _filter,
-                            onSelected: (_) =>
-                                setState(() => _filter = status),
+                            onSelected: (_) => setState(() => _filter = status),
                           ),
                         ),
                       )
@@ -325,7 +352,8 @@ class _AdminTicketsScreenState extends State<AdminTicketsScreen> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
                 child: Row(
                   children: [
                     Text(
@@ -349,8 +377,7 @@ class _AdminTicketsScreenState extends State<AdminTicketsScreen> {
                     : ListView.separated(
                         padding: const EdgeInsets.fromLTRB(18, 3, 18, 18),
                         itemCount: filtered.length,
-                        separatorBuilder: (_, __) =>
-                            const SizedBox(height: 10),
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
                         itemBuilder: (context, index) {
                           final ticket = filtered[index];
                           return TicketCard(
@@ -369,7 +396,6 @@ class _AdminTicketsScreenState extends State<AdminTicketsScreen> {
       ),
       bottomNavigationBar: const TicketBottomNavigation(
         isAdmin: true,
-        currentPath: AppRoutes.adminTickets,
       ),
     );
   }
@@ -391,7 +417,12 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final companyId = context.read<AuthProvider>().user!.companyId;
+    final companyId = context.read<AuthProvider>().user?.companyId;
+    if (companyId == null) {
+      _companyId = null;
+      _report = null;
+      return;
+    }
     if (_companyId != companyId) {
       _companyId = companyId;
       final now = DateTime.now();
@@ -402,11 +433,14 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
   }
 
   void _loadReport() {
-    final start = _start!;
-    final end = _endExclusive!;
+    final companyId = _companyId;
+    final start = _start;
+    final end = _endExclusive;
+    if (companyId == null || start == null || end == null) return;
     final periodLength = end.difference(start);
     final previousStart = start.subtract(periodLength);
     _report = _fetchReport(
+      companyId: companyId,
       currentStart: start,
       currentEnd: end,
       previousStart: previousStart,
@@ -415,6 +449,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
   }
 
   Future<_ReportData?> _fetchReport({
+    required String companyId,
     required DateTime currentStart,
     required DateTime currentEnd,
     required DateTime previousStart,
@@ -422,13 +457,13 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
   }) async {
     final provider = context.read<TicketProvider>();
     final current = await provider.ticketsInRange(
-      companyId: _companyId!,
+      companyId: companyId,
       start: currentStart,
       end: currentEnd,
     );
     if (current == null) return null;
     final previous = await provider.ticketsInRange(
-      companyId: _companyId!,
+      companyId: companyId,
       start: previousStart,
       end: previousEnd,
     );
@@ -437,14 +472,17 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
   }
 
   Future<void> _pickRange() async {
+    final start = _start;
+    final endExclusive = _endExclusive;
+    if (start == null || endExclusive == null) return;
     final now = DateTime.now();
     final picked = await showDateRangePicker(
       context: context,
       firstDate: DateTime(2020),
       lastDate: now,
       initialDateRange: DateTimeRange(
-        start: _start!,
-        end: _endExclusive!.subtract(const Duration(days: 1)),
+        start: start,
+        end: endExclusive.subtract(const Duration(days: 1)),
       ),
       helpText: 'Pilih rentang tanggal',
       saveText: 'Terapkan',
@@ -466,7 +504,18 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) {
+    if (context.watch<AuthProvider>().user == null) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    final start = _start;
+    final endExclusive = _endExclusive;
+    if (start == null || endExclusive == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    return Scaffold(
         appBar: AppBar(
           title: const Text('Laporan'),
           bottom: const PreferredSize(
@@ -527,10 +576,11 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
                 : ((tickets.length - previousCount) / previousCount * 100)
                     .round();
             final endInclusive =
-                _endExclusive!.subtract(const Duration(days: 1));
+                endExclusive.subtract(const Duration(days: 1));
             final statuses = {
               for (final status in TicketStatuses.all)
-                status: tickets.where((ticket) => ticket.status == status).length,
+                status:
+                    tickets.where((ticket) => ticket.status == status).length,
             };
             return ListView(
               padding: const EdgeInsets.fromLTRB(20, 14, 20, 26),
@@ -553,7 +603,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
                             ),
                             Text(
                               formatIndonesianDateRange(
-                                _start!,
+                                start,
                                 endInclusive,
                               ),
                               style: const TextStyle(color: AppColors.text),
@@ -565,6 +615,15 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
                     ],
                   ),
                 ),
+                if (tickets.isEmpty)
+                  const SizedBox(
+                    height: 190,
+                    child: EmptyState(
+                      title: 'Belum ada laporan',
+                      message:
+                          'Tidak ada tiket pada rentang tanggal yang dipilih.',
+                    ),
+                  ),
                 Container(
                   margin: const EdgeInsets.only(top: 14, bottom: 4),
                   padding: const EdgeInsets.all(18),
@@ -603,7 +662,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
                   ),
                 ),
                 const SectionHeading(title: 'Ringkasan status'),
-                                GridView(
+                GridView(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -702,9 +761,9 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
         ),
         bottomNavigationBar: const TicketBottomNavigation(
           isAdmin: true,
-          currentPath: AppRoutes.reports,
         ),
       );
+  }
 }
 
 class _ReportData {

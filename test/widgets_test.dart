@@ -1,13 +1,63 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:mocktail/mocktail.dart';
 import 'package:it_helpdesk_flutter/core/constants/app_constants.dart';
 import 'package:it_helpdesk_flutter/core/theme/app_theme.dart';
+import 'package:it_helpdesk_flutter/features/admin/admin_screens.dart';
 import 'package:it_helpdesk_flutter/features/auth/auth_screens.dart';
+import 'package:it_helpdesk_flutter/features/employee/employee_screens.dart';
+import 'package:it_helpdesk_flutter/models/app_user.dart';
 import 'package:it_helpdesk_flutter/models/ticket.dart';
 import 'package:it_helpdesk_flutter/providers/auth_provider.dart';
+import 'package:it_helpdesk_flutter/providers/ticket_provider.dart';
+import 'package:it_helpdesk_flutter/services/ticket_service.dart';
 import 'package:it_helpdesk_flutter/widgets/helpdesk_widgets.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
+
+class _MockFirestore extends Mock implements FirebaseFirestore {}
+
+class _TestTicketService extends TicketService {
+  _TestTicketService(this.ticket) : super(firestore: _MockFirestore());
+
+  final Ticket ticket;
+
+  @override
+  Stream<List<Ticket>> watchTickets({
+    required String? userId,
+    required String? companyId,
+  }) =>
+      Stream.value([]);
+
+  @override
+  Stream<Ticket?> watchTicket(String id) => Stream.value(ticket);
+
+  @override
+  Future<int> countTickets({
+    required String? userId,
+    required String? companyId,
+    required String status,
+  }) async =>
+      0;
+}
+
+class _FailingCountTicketService extends _TestTicketService {
+  _FailingCountTicketService(super.ticket);
+
+  @override
+  Future<int> countTickets({
+    required String? userId,
+    required String? companyId,
+    required String status,
+  }) async {
+    throw FirebaseException(
+      plugin: 'cloud_firestore',
+      message: 'UNAVAILABLE',
+    );
+  }
+}
 
 Ticket _ticket({String status = TicketStatuses.waiting}) => Ticket(
       id: 'a1b2c3ticket',
@@ -24,8 +74,82 @@ Ticket _ticket({String status = TicketStatuses.waiting}) => Ticket(
       updatedAt: DateTime(2026, 6, 24, 9, 42),
     );
 
+AppUser _user({bool isAdmin = false}) => AppUser(
+      uid: 'user-1',
+      name: 'Ayu Lestari',
+      email: 'ayu@gmail.com',
+      role: isAdmin ? UserRoles.admin : UserRoles.employee,
+      companyId: 'company-1',
+      companyCode: 'IT001',
+      status: AccountStatuses.active,
+      department: 'Operasional',
+    );
+
 void main() {
   setUpAll(() => initializeDateFormatting('id_ID'));
+
+  test('loadCounts stores a connection error when Firestore is unavailable',
+      () async {
+    final provider = TicketProvider(
+      ticketService: _FailingCountTicketService(_ticket()),
+    );
+    addTearDown(provider.dispose);
+
+    await expectLater(provider.loadCounts(_user()), completes);
+
+    expect(
+      provider.countsError,
+      'Tidak dapat terhubung ke server. Periksa koneksi internet Anda.',
+    );
+  });
+
+  testWidgets('logging out from Profile does not throw during rebuild',
+      (tester) async {
+    final authProvider = AuthProvider.forTesting(user: _user());
+    final router = GoRouter(
+      initialLocation: AppRoutes.employeeProfile,
+      routes: [
+        GoRoute(
+          path: AppRoutes.employeeProfile,
+          builder: (context, state) => const ProfileScreen(isAdmin: false),
+        ),
+        GoRoute(
+          path: AppRoutes.login,
+          builder: (context, state) => const Scaffold(body: Text('Login')),
+        ),
+      ],
+    );
+    addTearDown(authProvider.dispose);
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
+          ChangeNotifierProvider(
+            create: (_) => TicketProvider(
+              ticketService: _TestTicketService(_ticket()),
+            ),
+          ),
+        ],
+        child: MaterialApp.router(
+          theme: AppTheme.light,
+          routerConfig: router,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.drag(find.byType(ListView), const Offset(0, -1000));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Keluar dari akun'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ya, Keluar'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Login'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('Onboarding fits normal screens and scrolls on short screens',
       (tester) async {
@@ -74,7 +198,13 @@ void main() {
     await tester.tap(find.text('Masuk'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Email wajib diisi.'), findsOneWidget);
+    expect(find.textContaining('Email wajib diisi.'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('login-email')),
+      'ayu@gmail.com',
+    );
+    await tester.pump();
+    expect(find.byType(AlertBanner), findsNothing);
     authProvider.dispose();
   });
 
@@ -241,7 +371,7 @@ void main() {
       ),
     );
 
-    expect(find.text('Email'), findsOneWidget);
+    expect(find.text('Email *'), findsOneWidget);
 
     await tester.pumpWidget(
       ChangeNotifierProvider<AuthProvider>.value(
@@ -249,7 +379,223 @@ void main() {
         child: const MaterialApp(home: RegisterEmployeeScreen()),
       ),
     );
-    expect(find.text('Email'), findsOneWidget);
+    expect(find.text('Email *'), findsOneWidget);
+    authProvider.dispose();
+  });
+
+  testWidgets('AlertBanner variants share dimensions and show their message',
+      (tester) async {
+    const variants = AlertBannerVariant.values;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Column(
+          children: [
+            for (final variant in variants)
+              AlertBanner(message: 'Pesan', variant: variant),
+          ],
+        ),
+      ),
+    );
+
+    final banners = tester.widgetList<AlertBanner>(find.byType(AlertBanner));
+    expect(banners, hasLength(3));
+    final containers = tester
+        .widgetList<Container>(
+          find.descendant(
+            of: find.byType(AlertBanner),
+            matching: find.byType(Container),
+          ),
+        )
+        .toList();
+    expect(containers, hasLength(3));
+    expect(
+        containers.map((container) => container.padding).toSet(), hasLength(1));
+    expect(
+      containers
+          .map((container) =>
+              (container.decoration! as BoxDecoration).borderRadius)
+          .toSet(),
+      hasLength(1),
+    );
+    expect(find.text('Pesan'), findsNWidgets(3));
+  });
+
+  testWidgets('confirmation dialog actions are side by side and equal width',
+      (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () => showConfirmDialog(
+                context: context,
+                title: 'Konfirmasi',
+                content: const Text('Lanjutkan?'),
+                confirmLabel: 'Ya, Lanjutkan',
+              ),
+              child: const Text('Buka dialog'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Buka dialog'));
+    await tester.pumpAndSettle();
+
+    final cancel = tester.getRect(find.byType(OutlinedButton));
+    final confirm = tester.getRect(find.byType(FilledButton));
+    expect(cancel.center.dy, confirm.center.dy);
+    expect(cancel.width, moreOrLessEquals(confirm.width));
+    expect(cancel.left, lessThan(confirm.left));
+  });
+
+  testWidgets('employee and admin bottom navigation track each active tab',
+      (tester) async {
+    for (final (isAdmin, paths, labels) in [
+      (
+        false,
+        [
+          AppRoutes.employeeHome,
+          AppRoutes.employeeTickets,
+          AppRoutes.employeeProfile,
+        ],
+        ['Beranda', 'Tiket Saya', 'Profil'],
+      ),
+      (
+        true,
+        [
+          AppRoutes.adminHome,
+          AppRoutes.adminTickets,
+          AppRoutes.reports,
+          AppRoutes.adminProfile,
+        ],
+        ['Dashboard', 'Semua Tiket', 'Laporan', 'Profil'],
+      ),
+    ]) {
+      final router = GoRouter(
+        initialLocation: paths.first,
+        routes: [
+          for (final path in paths)
+            GoRoute(
+              path: path,
+              builder: (context, state) => Scaffold(
+                bottomNavigationBar: TicketBottomNavigation(isAdmin: isAdmin),
+              ),
+            ),
+        ],
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+      await tester.pumpAndSettle();
+
+      for (var index = 0; index < labels.length; index++) {
+        await tester.tap(find.text(labels[index]));
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .widget<NavigationBar>(find.byType(NavigationBar))
+              .selectedIndex,
+          index,
+        );
+      }
+    }
+  });
+
+  testWidgets('employee and admin status filters default to Semua',
+      (tester) async {
+    for (final isAdmin in [false, true]) {
+      final path = isAdmin ? AppRoutes.adminTickets : AppRoutes.employeeTickets;
+      final ticketProvider =
+          TicketProvider(ticketService: _TestTicketService(_ticket()));
+      final authProvider =
+          AuthProvider.forTesting(user: _user(isAdmin: isAdmin));
+      final router = GoRouter(
+        initialLocation: path,
+        routes: [
+          GoRoute(
+            path: path,
+            builder: (context, state) => isAdmin
+                ? const AdminTicketsScreen()
+                : const EmployeeTicketsScreen(),
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<TicketProvider>.value(
+              value: ticketProvider,
+            ),
+            ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+          tester.widgetList<ChoiceChip>(find.byType(ChoiceChip)).first.selected,
+          isTrue);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      router.dispose();
+      ticketProvider.dispose();
+      authProvider.dispose();
+    }
+  });
+
+  testWidgets('ticket create and edit dropdowns use ticket values',
+      (tester) async {
+    final ticketProvider =
+        TicketProvider(ticketService: _TestTicketService(_ticket()));
+    final authProvider = AuthProvider.forTesting(user: _user());
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<TicketProvider>.value(value: ticketProvider),
+          ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
+        ],
+        child: const MaterialApp(home: CreateTicketScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<DropdownButtonFormField<String>>(
+            find.byKey(const ValueKey('ticket-category')),
+          )
+          .initialValue,
+      TicketCategories.computer,
+    );
+    expect(
+      tester
+          .widget<DropdownButtonFormField<String>>(
+            find.byKey(const ValueKey('ticket-priority')),
+          )
+          .initialValue,
+      TicketPriorities.normal,
+    );
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<TicketProvider>.value(value: ticketProvider),
+          ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
+        ],
+        child: const MaterialApp(
+          home: EditTicketScreen(ticketId: 'a1b2c3ticket'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final fields = tester.widgetList<DropdownButtonFormField<String>>(
+      find.byType(DropdownButtonFormField<String>),
+    );
+    expect(fields.first.initialValue, TicketCategories.printer);
+    expect(fields.last.initialValue, TicketPriorities.urgent);
+    ticketProvider.dispose();
     authProvider.dispose();
   });
 
@@ -271,6 +617,10 @@ void main() {
 
     expect(find.text('Printer tidak bisa mencetak'), findsOneWidget);
     expect(find.text('HD-A1B2C3'), findsOneWidget);
+    final card = tester.getRect(find.byType(Card));
+    final chevron = tester.getRect(find.byIcon(Icons.chevron_right));
+    expect(chevron.center.dy, closeTo(card.center.dy, 1));
+    expect(chevron.right, closeTo(card.right - 15, 2));
   });
 
   testWidgets('PriorityBadge supports CITO, Segera, and Biasa', (tester) async {
@@ -311,6 +661,10 @@ void main() {
     expect(find.text('Edit'), findsOneWidget);
     expect(find.text('Batalkan'), findsOneWidget);
     expect(find.text('Hapus tiket'), findsNothing);
+    final buttons = find.byType(OutlinedButton);
+    expect(tester.widgetList<OutlinedButton>(buttons), hasLength(2));
+    expect(tester.getRect(buttons.at(0)).height, 48);
+    expect(tester.getRect(buttons.at(1)).height, 48);
   });
 
   testWidgets('Edit and Batalkan are hidden for non-waiting tickets',

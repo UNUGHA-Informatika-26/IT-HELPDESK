@@ -12,6 +12,24 @@ class FormValidators {
     return valid ? null : 'Format email tidak valid.';
   }
 
+  static String? registrationEmail(String? value) {
+    final emailError = email(value);
+    if (emailError != null) return emailError;
+    return isAllowedRegistrationEmail(value!)
+        ? null
+        : AppConstants.unsupportedRegistrationEmailMessage;
+  }
+
+  static bool isAllowedRegistrationEmail(String value) {
+    final normalizedEmail = value.trim().toLowerCase();
+    final atIndex = normalizedEmail.lastIndexOf('@');
+    if (atIndex <= 0 || atIndex == normalizedEmail.length - 1) return false;
+    final domain = normalizedEmail.substring(atIndex + 1);
+    return AppConstants.allowedEmailDomains.contains(domain) ||
+        AppConstants.allowedEmailDomainSuffixes
+            .any((suffix) => domain.endsWith(suffix));
+  }
+
   static String? password(String? value) {
     if (value == null || value.isEmpty) return 'Password wajib diisi.';
     return value.length < AppConstants.minimumPasswordLength

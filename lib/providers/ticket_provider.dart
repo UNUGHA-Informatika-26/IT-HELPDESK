@@ -15,11 +15,20 @@ class TicketProvider extends ChangeNotifier {
   final TicketService _ticketService;
   bool _isBusy = false;
   String? _error;
+  String? _countsError;
+  String? _loadingCountsFor;
   Map<String, int> _counts = {};
 
   bool get isBusy => _isBusy;
   String? get error => _error;
+  String? get countsError => _countsError;
   Map<String, int> get counts => Map.unmodifiable(_counts);
+
+  void clearError() {
+    if (_error == null) return;
+    _error = null;
+    notifyListeners();
+  }
 
   Stream<List<Ticket>> watchTickets(AppUser user) =>
       _ticketService.watchTickets(
@@ -33,8 +42,14 @@ class TicketProvider extends ChangeNotifier {
   Stream<List<TicketUpdate>> watchUpdates(String ticketId) =>
       _ticketService.watchUpdates(ticketId);
 
-  Future<void> loadCounts(AppUser user) async {
-    _error = null;
+  Future<void> loadCounts(
+    AppUser? user, {
+    bool Function()? isCurrent,
+  }) async {
+    if (user == null || !(isCurrent?.call() ?? true)) return;
+    if (_loadingCountsFor == user.uid) return;
+    _loadingCountsFor = user.uid;
+    _countsError = null;
     try {
       final results = await Future.wait(
         TicketStatuses.all.map(
@@ -45,11 +60,19 @@ class TicketProvider extends ChangeNotifier {
           ),
         ),
       );
+      if (!(isCurrent?.call() ?? true)) return;
       _counts = Map.fromIterables(TicketStatuses.all, results);
-    } on FirebaseException catch (exception) {
-      _error = firestoreErrorMessage(exception);
+    } on Object {
+      if (isCurrent?.call() ?? true) {
+        _countsError =
+            'Tidak dapat terhubung ke server. Periksa koneksi internet Anda.';
+      }
+    } finally {
+      if (_loadingCountsFor == user.uid) {
+        _loadingCountsFor = null;
+        if (isCurrent?.call() ?? true) notifyListeners();
+      }
     }
-    notifyListeners();
   }
 
   Future<String?> createTicket({

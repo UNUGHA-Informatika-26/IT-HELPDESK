@@ -30,14 +30,18 @@ GoRouter createAppRouter(AuthProvider authProvider) => GoRouter(
         }
 
         if (isAuthRoute) {
-          return authProvider.user!.isAdmin
+          final user = authProvider.user;
+          if (user == null) return AppRoutes.login;
+          return user.isAdmin
               ? AppRoutes.adminHome
               : AppRoutes.employeeHome;
         }
-        if (location.startsWith('/admin') && !authProvider.user!.isAdmin) {
+        final user = authProvider.user;
+        if (user == null) return AppRoutes.login;
+        if (location.startsWith('/admin') && !user.isAdmin) {
           return AppRoutes.accessDenied;
         }
-        if (location.startsWith('/employee') && authProvider.user!.isAdmin) {
+        if (location.startsWith('/employee') && user.isAdmin) {
           return AppRoutes.accessDenied;
         }
         return null;

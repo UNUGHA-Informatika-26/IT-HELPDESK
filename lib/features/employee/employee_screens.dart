@@ -27,22 +27,39 @@ class EmployeeDashboardScreen extends StatefulWidget {
 class _EmployeeDashboardScreenState extends State<EmployeeDashboardScreen> {
   Stream<List<Ticket>>? _tickets;
   String? _uid;
-  String? _countSignature;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final user = context.read<AuthProvider>().user!;
+    final user = context.read<AuthProvider>().user;
+    if (user == null) {
+      _uid = null;
+      _tickets = null;
+      return;
+    }
     if (_uid != user.uid) {
       _uid = user.uid;
       _tickets = context.read<TicketProvider>().watchTickets(user);
+      _loadCounts(user);
     }
+  }
+
+  void _loadCounts(AppUser user) {
+    final uid = user.uid;
+    context.read<TicketProvider>().loadCounts(
+          user,
+          isCurrent: () =>
+              mounted && context.read<AuthProvider>().user?.uid == uid,
+        );
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-    final user = auth.user!;
+    final user = auth.user;
+    if (user == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
     final counts = context.watch<TicketProvider>().counts;
     final today = DateTime.now();
     return Scaffold(
@@ -61,18 +78,16 @@ class _EmployeeDashboardScreenState extends State<EmployeeDashboardScreen> {
             }
             if (!snapshot.hasData) return const LoadingState();
             final tickets = snapshot.data!;
-            final signature = tickets
-                .map((ticket) => '${ticket.id}:${ticket.status}')
-                .join('|');
-            if (_countSignature != signature) {
-              _countSignature = signature;
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) context.read<TicketProvider>().loadCounts(user);
-              });
-            }
             return ListView(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
               children: [
+                if (context.watch<TicketProvider>().countsError != null) ...[
+                  RetryableAlertBanner(
+                    message: context.watch<TicketProvider>().countsError!,
+                    onRetry: () => _loadCounts(user),
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 Row(
                   children: [
                     Expanded(
@@ -187,9 +202,12 @@ class _EmployeeDashboardScreenState extends State<EmployeeDashboardScreen> {
                   ),
                 ),
                 if (tickets.isEmpty)
-                  const EmptyState(
-                    title: 'Belum ada tiket',
-                    message: 'Tiket yang Anda buat akan muncul di sini.',
+                  const SizedBox(
+                    height: 190,
+                    child: EmptyState(
+                      title: 'Belum ada tiket',
+                      message: 'Tiket yang Anda buat akan muncul di sini.',
+                    ),
                   )
                 else
                   for (final ticket in tickets.take(2)) ...[
@@ -201,15 +219,6 @@ class _EmployeeDashboardScreenState extends State<EmployeeDashboardScreen> {
                     ),
                     const SizedBox(height: 10),
                   ],
-                if (context.watch<TicketProvider>().error != null)
-                  TextButton.icon(
-                    onPressed: () =>
-                        context.read<TicketProvider>().loadCounts(user),
-                    icon: const Icon(Icons.refresh),
-                    label: Text(
-                      '${context.watch<TicketProvider>().error} · Coba lagi',
-                    ),
-                  ),
               ],
             );
           },
@@ -217,7 +226,6 @@ class _EmployeeDashboardScreenState extends State<EmployeeDashboardScreen> {
       ),
       bottomNavigationBar: const TicketBottomNavigation(
         isAdmin: false,
-        currentPath: AppRoutes.employeeHome,
       ),
     );
   }
@@ -243,18 +251,7 @@ class NotificationsScreen extends StatelessWidget {
               onPressed: provider.isBusy
                   ? null
                   : () async {
-                      final messenger = ScaffoldMessenger.of(context);
-                      final ok = await context
-                          .read<NotificationProvider>()
-                          .markAllRead();
-                      if (!context.mounted || ok) return;
-                      messenger.showSnackBar(
-                        SnackBar(
-                          content: Text(
-                              context.read<NotificationProvider>().error ??
-                                  'Pemberitahuan gagal diperbarui.'),
-                        ),
-                      );
+                      await context.read<NotificationProvider>().markAllRead();
                     },
               child: const Text('Tandai semua dibaca'),
             ),
@@ -262,22 +259,33 @@ class NotificationsScreen extends StatelessWidget {
       ),
       body: provider.isLoading
           ? const LoadingState()
-          : provider.error != null
-              ? ErrorState(
-                  message: provider.error!,
-                  onRetry: context.read<NotificationProvider>().retry,
-                )
-              : provider.notifications.isEmpty
-                  ? const EmptyState(title: 'Belum ada pemberitahuan')
-                  : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
-                      itemCount: provider.notifications.length,
-                      separatorBuilder: (_, __) =>
-                          const Divider(height: 1, indent: 16),
-                      itemBuilder: (context, index) => _NotificationTile(
-                        notification: provider.notifications[index],
-                      ),
-                    ),
+          : Column(
+              children: [
+                if (provider.error != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    child: AlertBanner(message: provider.error!),
+                  ),
+                if (provider.error != null && provider.notifications.isEmpty)
+                  TextButton(
+                    onPressed: context.read<NotificationProvider>().retry,
+                    child: const Text('Coba lagi'),
+                  ),
+                Expanded(
+                  child: provider.notifications.isEmpty
+                      ? const EmptyState(title: 'Belum ada pemberitahuan')
+                      : ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+                          itemCount: provider.notifications.length,
+                          separatorBuilder: (_, __) =>
+                              const Divider(height: 1, indent: 16),
+                          itemBuilder: (context, index) => _NotificationTile(
+                            notification: provider.notifications[index],
+                          ),
+                        ),
+                ),
+              ],
+            ),
     );
   }
 }
@@ -352,28 +360,13 @@ class _NotificationTile extends StatelessWidget {
         icon: const Icon(Icons.delete_outline),
         color: AppColors.cancelled,
         onPressed: () async {
-          final messenger = ScaffoldMessenger.of(context);
-          final ok = await provider.deleteNotification(notification.id);
-          if (!context.mounted || ok) return;
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text(provider.error ?? 'Pemberitahuan gagal dihapus.'),
-            ),
-          );
+          await provider.deleteNotification(notification.id);
         },
       ),
       onTap: notification.read
           ? null
           : () async {
-              final messenger = ScaffoldMessenger.of(context);
-              final ok = await provider.markRead(notification.id);
-              if (!context.mounted || ok) return;
-              messenger.showSnackBar(
-                SnackBar(
-                  content:
-                      Text(provider.error ?? 'Pemberitahuan gagal diperbarui.'),
-                ),
-              );
+              await provider.markRead(notification.id);
             },
     );
   }
@@ -395,12 +388,26 @@ class _EmployeeTicketsScreenState extends State<EmployeeTicketsScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final user = context.read<AuthProvider>().user!;
+    final user = context.read<AuthProvider>().user;
+    if (user == null) {
+      _uid = null;
+      _tickets = null;
+      return;
+    }
     if (_uid != user.uid) {
       _uid = user.uid;
       _tickets = context.read<TicketProvider>().watchTickets(user);
-      context.read<TicketProvider>().loadCounts(user);
+      _loadCounts(user);
     }
+  }
+
+  void _loadCounts(AppUser user) {
+    final uid = user.uid;
+    context.read<TicketProvider>().loadCounts(
+          user,
+          isCurrent: () =>
+              mounted && context.read<AuthProvider>().user?.uid == uid,
+        );
   }
 
   @override
@@ -411,7 +418,11 @@ class _EmployeeTicketsScreenState extends State<EmployeeTicketsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final user = context.read<AuthProvider>().user!;
+    final user = context.watch<AuthProvider>().user;
+    if (user == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    final successMessage = GoRouterState.of(context).extra as String?;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Tiket Saya'),
@@ -453,6 +464,22 @@ class _EmployeeTicketsScreenState extends State<EmployeeTicketsScreen> {
           }).toList();
           return Column(
             children: [
+              if (context.watch<TicketProvider>().countsError != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+                  child: RetryableAlertBanner(
+                    message: context.watch<TicketProvider>().countsError!,
+                    onRetry: () => _loadCounts(user),
+                  ),
+                ),
+              if (successMessage != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+                  child: AlertBanner(
+                    message: successMessage,
+                    variant: AlertBannerVariant.success,
+                  ),
+                ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
                 child: TextField(
@@ -531,7 +558,6 @@ class _EmployeeTicketsScreenState extends State<EmployeeTicketsScreen> {
       ),
       bottomNavigationBar: const TicketBottomNavigation(
         isAdmin: false,
-        currentPath: AppRoutes.employeeTickets,
       ),
     );
   }
@@ -547,8 +573,7 @@ class CreateTicketScreen extends StatefulWidget {
 class _CreateTicketScreenState extends State<CreateTicketScreen> {
   final _title = TextEditingController();
   final _description = TextEditingController();
-  final _formKey = GlobalKey<FormState>();
-  String? _category;
+  String _category = TicketCategories.all.first;
   String _priority = TicketPriorities.normal;
   String? _validationError;
 
@@ -561,21 +586,26 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
 
   Future<void> _submit() async {
     setState(() => _validationError = null);
-    if (_category == null ||
-        _title.text.trim().isEmpty ||
-        _description.text.trim().isEmpty) {
+    context.read<TicketProvider>().clearError();
+    if (_title.text.trim().isEmpty || _description.text.trim().isEmpty) {
       setState(() {
         _validationError = 'Lengkapi semua field wajib sebelum mengirim.';
       });
       return;
     }
-    if (!_formKey.currentState!.validate()) return;
-    final user = context.read<AuthProvider>().user!;
+    final validationError = FormValidators.ticketTitle(_title.text) ??
+        FormValidators.ticketDescription(_description.text);
+    if (validationError != null) {
+      setState(() => _validationError = validationError);
+      return;
+    }
+    final user = context.read<AuthProvider>().user;
+    if (user == null) return;
     final id = await context.read<TicketProvider>().createTicket(
           user: user,
           title: _title.text,
           description: _description.text,
-          category: _category!,
+          category: _category,
           priority: _priority,
         );
     if (!mounted) return;
@@ -599,85 +629,101 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
           icon: const Icon(Icons.arrow_back),
         ),
       ),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 32),
-          children: [
-            Text(
-              'Ceritakan kendala Anda',
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineSmall
-                  ?.copyWith(fontWeight: FontWeight.w700),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 32),
+        children: [
+          Text(
+            'Ceritakan kendala Anda',
+            style: Theme.of(context)
+                .textTheme
+                .headlineSmall
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            '* wajib diisi',
+            style: TextStyle(color: AppColors.muted, fontSize: 12),
+          ),
+          const SizedBox(height: 14),
+          DropdownButtonFormField<String>(
+            key: const ValueKey('ticket-category'),
+            initialValue: _category,
+            decoration: const InputDecoration(
+              label: RequiredFieldLabel('Kategori'),
             ),
-            const SizedBox(height: 20),
-            DropdownButtonFormField<String>(
-              key: const ValueKey('ticket-category'),
-              initialValue: _category,
-              decoration: const InputDecoration(labelText: 'Kategori'),
-              items: TicketCategories.all
-                  .map((value) => DropdownMenuItem(
-                        value: value,
-                        child: Text(value),
-                      ))
-                  .toList(),
-              validator: (value) => value == null ? 'Pilih kategori.' : null,
-              onChanged: (value) => setState(() => _category = value),
+            items: TicketCategories.all
+                .map((value) => DropdownMenuItem(
+                      value: value,
+                      child: Text(value),
+                    ))
+                .toList(),
+            onChanged: (value) {
+              if (value != null) {
+                setState(() {
+                  _category = value;
+                  _validationError = null;
+                });
+                context.read<TicketProvider>().clearError();
+              }
+            },
+          ),
+          const SizedBox(height: 14),
+          DropdownButtonFormField<String>(
+            key: const ValueKey('ticket-priority'),
+            initialValue: _priority,
+            decoration: const InputDecoration(
+              label: RequiredFieldLabel('Prioritas'),
             ),
-            const SizedBox(height: 14),
-            DropdownButtonFormField<String>(
-              key: const ValueKey('ticket-priority'),
-              initialValue: _priority,
-              decoration: const InputDecoration(labelText: 'Prioritas'),
-              items: TicketPriorities.all
-                  .map((value) => DropdownMenuItem(
-                        value: value,
-                        child: Text(value),
-                      ))
-                  .toList(),
-              onChanged: (value) {
-                if (value != null) setState(() => _priority = value);
-              },
+            items: TicketPriorities.all
+                .map((value) => DropdownMenuItem(
+                      value: value,
+                      child: Text(value),
+                    ))
+                .toList(),
+            onChanged: (value) {
+              if (value != null) setState(() => _priority = value);
+            },
+          ),
+          const SizedBox(height: 8),
+          const _PriorityHelp(),
+          const SizedBox(height: 14),
+          TextFormField(
+            controller: _title,
+            onChanged: (_) {
+              setState(() => _validationError = null);
+              context.read<TicketProvider>().clearError();
+            },
+            maxLength: AppConstants.maxTicketTitleLength,
+            decoration: const InputDecoration(
+              label: RequiredFieldLabel('Judul kendala'),
+              hintText: 'Ringkas dan spesifik',
             ),
-            const SizedBox(height: 8),
-            const _PriorityHelp(),
-            const SizedBox(height: 14),
-            TextFormField(
-              controller: _title,
-              maxLength: AppConstants.maxTicketTitleLength,
-              decoration: const InputDecoration(
-                labelText: 'Judul kendala',
-                hintText: 'Ringkas dan spesifik',
-              ),
-              validator: FormValidators.ticketTitle,
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: _description,
+            onChanged: (_) {
+              setState(() => _validationError = null);
+              context.read<TicketProvider>().clearError();
+            },
+            minLines: 4,
+            maxLines: 7,
+            maxLength: AppConstants.maxTicketDescriptionLength,
+            decoration: const InputDecoration(
+              label: RequiredFieldLabel('Deskripsi'),
+              alignLabelWithHint: true,
             ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _description,
-              minLines: 4,
-              maxLines: 7,
-              maxLength: AppConstants.maxTicketDescriptionLength,
-              decoration: const InputDecoration(
-                labelText: 'Deskripsi',
-                alignLabelWithHint: true,
-              ),
-              validator: FormValidators.ticketDescription,
-            ),
-            if (_validationError != null || provider.error != null) ...[
-              const SizedBox(height: 10),
-              _MutationError(
-                message: _validationError ?? provider.error!,
-                onRetry: _submit,
-              ),
-            ],
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: provider.isBusy ? null : _submit,
-              child: Text(provider.isBusy ? 'Mengirim...' : 'Kirim Tiket'),
-            ),
+          ),
+          if (_validationError != null || provider.error != null) ...[
+            const SizedBox(height: 10),
+            AlertBanner(message: _validationError ?? provider.error!),
           ],
-        ),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: provider.isBusy ? null : _submit,
+            child: Text(provider.isBusy ? 'Mengirim...' : 'Kirim Tiket'),
+          ),
+        ],
       ),
     );
   }
@@ -699,7 +745,12 @@ class _EditTicketScreenState extends State<EditTicketScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final userId = context.read<AuthProvider>().user!.uid;
+    final userId = context.read<AuthProvider>().user?.uid;
+    if (userId == null) {
+      _uid = null;
+      _ticket = null;
+      return;
+    }
     if (_uid != userId) {
       _uid = userId;
       _ticket = context.read<TicketProvider>().watchTicket(widget.ticketId);
@@ -707,61 +758,67 @@ class _EditTicketScreenState extends State<EditTicketScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(
-          title: const Text('Edit Tiket'),
-          leading: IconButton(
-            onPressed: () => context.go(
-              '/employee/tickets/${widget.ticketId}',
-            ),
-            icon: const Icon(Icons.arrow_back),
-          ),
-        ),
-        body: StreamBuilder<Ticket?>(
-          stream: _ticket,
-          builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              return ErrorState(
-                message: 'Tiket gagal dimuat.',
-                onRetry: () => setState(
-                  () => _ticket = context
-                      .read<TicketProvider>()
-                      .watchTicket(widget.ticketId),
-                ),
-              );
-            }
-            if (!snapshot.hasData) return const LoadingState();
-            final ticket = snapshot.data;
-            if (ticket == null) {
-              return const EmptyState(title: 'Tiket tidak ditemukan');
-            }
-            if (!ticket.canEdit) {
-              return const EmptyState(
-                title: 'Tiket tidak dapat diedit',
-                message: 'Edit hanya tersedia saat status Menunggu.',
-              );
-            }
-            return _TicketForm(
-              ticket: ticket,
-              isEditing: true,
-              onSubmit: (title, description, category, priority) async {
-                final ok = await context.read<TicketProvider>().editTicket(
-                      ticketId: ticket.id,
-                      title: title,
-                      description: description,
-                      category: category,
-                      priority: priority,
-                    );
-                if (!context.mounted || !ok) return;
-                context.go(
-                  '/employee/tickets/${ticket.id}',
-                  extra: 'Perubahan tiket berhasil disimpan',
-                );
-              },
-            );
-          },
-        ),
+  Widget build(BuildContext context) {
+    if (context.watch<AuthProvider>().user == null) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
       );
+    }
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Edit Tiket'),
+        leading: IconButton(
+          onPressed: () => context.go(
+            '/employee/tickets/${widget.ticketId}',
+          ),
+          icon: const Icon(Icons.arrow_back),
+        ),
+      ),
+      body: StreamBuilder<Ticket?>(
+        stream: _ticket,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return ErrorState(
+              message: 'Tiket gagal dimuat.',
+              onRetry: () => setState(
+                () => _ticket =
+                    context.read<TicketProvider>().watchTicket(widget.ticketId),
+              ),
+            );
+          }
+          if (!snapshot.hasData) return const LoadingState();
+          final ticket = snapshot.data;
+          if (ticket == null) {
+            return const EmptyState(title: 'Tiket tidak ditemukan');
+          }
+          if (!ticket.canEdit) {
+            return const EmptyState(
+              title: 'Tiket tidak dapat diedit',
+              message: 'Edit hanya tersedia saat status Menunggu.',
+            );
+          }
+          return _TicketForm(
+            ticket: ticket,
+            isEditing: true,
+            onSubmit: (title, description, category, priority) async {
+              final ok = await context.read<TicketProvider>().editTicket(
+                    ticketId: ticket.id,
+                    title: title,
+                    description: description,
+                    category: category,
+                    priority: priority,
+                  );
+              if (!context.mounted || !ok) return;
+              context.go(
+                '/employee/tickets/${ticket.id}',
+                extra: 'Perubahan tiket berhasil disimpan',
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
 }
 
 class TicketDetailScreen extends StatefulWidget {
@@ -791,7 +848,13 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final uid = context.read<AuthProvider>().user!.uid;
+    final uid = context.read<AuthProvider>().user?.uid;
+    if (uid == null) {
+      _uid = null;
+      _ticket = null;
+      _updates = null;
+      return;
+    }
     if (_uid != uid) {
       _uid = uid;
       _ticket = context.read<TicketProvider>().watchTicket(widget.ticketId);
@@ -801,69 +864,78 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(
-          title: const Text('Detail Tiket'),
-          leading: IconButton(
-            onPressed: () => context.go(
-              widget.isAdmin
-                  ? AppRoutes.adminTickets
-                  : AppRoutes.employeeTickets,
-            ),
-            icon: const Icon(Icons.arrow_back),
-          ),
-        ),
-        body: StreamBuilder<Ticket?>(
-          stream: _ticket,
-          builder: (context, ticketSnapshot) {
-            if (ticketSnapshot.hasError) {
-              return ErrorState(
-                message: 'Tiket gagal dimuat.',
-                onRetry: () => setState(
-                  () => _ticket = context
-                      .read<TicketProvider>()
-                      .watchTicket(widget.ticketId),
-                ),
-              );
-            }
-            if (!ticketSnapshot.hasData) return const LoadingState();
-            final ticket = ticketSnapshot.data;
-            if (ticket == null) {
-              return widget.isAdmin
-                  ? const EmptyState(title: 'Tiket tidak ditemukan')
-                  : EmptyState(
-                      title: 'Tiket ini sudah dihapus atau tidak tersedia',
-                      actionLabel: 'Kembali ke Tiket Saya',
-                      onAction: () => context.go(AppRoutes.employeeTickets),
-                    );
-            }
-            return StreamBuilder<List<TicketUpdate>>(
-              stream: _updates,
-              builder: (context, updateSnapshot) {
-                if (updateSnapshot.hasError) {
-                  return ErrorState(
-                    message: 'Riwayat status gagal dimuat.',
-                    onRetry: () => setState(
-                      () => _updates = context
-                          .read<TicketProvider>()
-                          .watchUpdates(widget.ticketId),
-                    ),
-                  );
-                }
-                if (!updateSnapshot.hasData) return const LoadingState();
-                return _buildTicket(context, ticket, updateSnapshot.data!);
-              },
-            );
-          },
-        ),
+  Widget build(BuildContext context) {
+    if (context.watch<AuthProvider>().user == null) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
       );
+    }
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Detail Tiket'),
+        leading: IconButton(
+          onPressed: () => context.go(
+            widget.isAdmin ? AppRoutes.adminTickets : AppRoutes.employeeTickets,
+          ),
+          icon: const Icon(Icons.arrow_back),
+        ),
+      ),
+      body: StreamBuilder<Ticket?>(
+        stream: _ticket,
+        builder: (context, ticketSnapshot) {
+          if (ticketSnapshot.hasError) {
+            return ErrorState(
+              message: 'Tiket gagal dimuat.',
+              onRetry: () => setState(
+                () => _ticket =
+                    context.read<TicketProvider>().watchTicket(widget.ticketId),
+              ),
+            );
+          }
+          if (!ticketSnapshot.hasData) return const LoadingState();
+          final ticket = ticketSnapshot.data;
+          if (ticket == null) {
+            return widget.isAdmin
+                ? const EmptyState(title: 'Tiket tidak ditemukan')
+                : EmptyState(
+                    title: 'Tiket ini sudah dihapus atau tidak tersedia',
+                    actionLabel: 'Kembali ke Tiket Saya',
+                    onAction: () => context.go(AppRoutes.employeeTickets),
+                  );
+          }
+          return StreamBuilder<List<TicketUpdate>>(
+            stream: _updates,
+            builder: (context, updateSnapshot) {
+              if (updateSnapshot.hasError) {
+                return ErrorState(
+                  message: 'Riwayat status gagal dimuat.',
+                  onRetry: () => setState(
+                    () => _updates = context
+                        .read<TicketProvider>()
+                        .watchUpdates(widget.ticketId),
+                  ),
+                );
+              }
+              if (!updateSnapshot.hasData) return const LoadingState();
+              return _buildTicket(context, ticket, updateSnapshot.data!);
+            },
+          );
+        },
+      ),
+    );
+  }
 
   Widget _buildTicket(
     BuildContext context,
     Ticket ticket,
     List<TicketUpdate> updates,
   ) {
-    final isOwner = ticket.userId == context.read<AuthProvider>().user!.uid;
+    final user = context.read<AuthProvider>().user;
+    if (user == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final isOwner = ticket.userId == user.uid;
+    final mutationError = context.watch<TicketProvider>().error;
     if (widget.isAdmin && _reporterUid != ticket.userId) {
       _reporterUid = ticket.userId;
       _reporterProfile =
@@ -873,8 +945,15 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 30),
       children: [
+        if (mutationError != null) ...[
+          AlertBanner(message: mutationError),
+          const SizedBox(height: 12),
+        ],
         if (_successMessage != null) ...[
-          _SuccessBanner(message: _successMessage!),
+          AlertBanner(
+            message: _successMessage!,
+            variant: AlertBannerVariant.success,
+          ),
           const SizedBox(height: 12),
         ],
         Container(
@@ -1019,13 +1098,14 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
                 isOwner &&
                 ticket.status == TicketStatuses.waiting)) ...[
           const SizedBox(height: 14),
-          OutlinedButton.icon(
-            onPressed: () => _confirmDelete(context, ticket),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.cancelled,
+          SizedBox(
+            width: double.infinity,
+            child: TicketActionButton(
+              label: 'Hapus tiket',
+              icon: Icons.delete_outline,
+              color: AppColors.cancelled,
+              onPressed: () => _confirmDelete(context, ticket),
             ),
-            icon: const Icon(Icons.delete_outline),
-            label: const Text('Hapus tiket'),
           ),
         ],
       ],
@@ -1050,52 +1130,21 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
   }
 
   Future<void> _confirmCancel(BuildContext context, Ticket ticket) async {
-    final shouldCancel = await showDialog<bool>(
+    final shouldCancel = await showConfirmDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        icon:
-            const Icon(Icons.warning_amber_rounded, color: AppColors.cancelled),
-        title: const Text('Batalkan tiket?'),
-        content: const Text(
-          'Tiket tidak akan dihapus, tetapi statusnya berubah menjadi Dibatalkan.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Kembali'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Ya, Batalkan'),
-          ),
-        ],
+      title: 'Batalkan tiket?',
+      content: const Text(
+        'Tiket tidak akan dihapus, tetapi statusnya berubah menjadi Dibatalkan.',
       ),
+      confirmLabel: 'Ya, Batalkan',
+      icon: Icons.warning_amber_rounded,
+      iconColor: AppColors.cancelled,
     );
     if (shouldCancel != true || !context.mounted) return;
     final ok = await context.read<TicketProvider>().cancelTicket(ticket.id);
     if (!context.mounted) return;
     if (ok) {
       setState(() => _successMessage = 'Tiket berhasil dibatalkan');
-    } else {
-      _showError(
-        context,
-        context.read<TicketProvider>().error,
-        () => _retryCancel(ticket.id),
-      );
-    }
-  }
-
-  Future<void> _retryCancel(String ticketId) async {
-    final ok = await context.read<TicketProvider>().cancelTicket(ticketId);
-    if (!mounted) return;
-    if (ok) {
-      setState(() => _successMessage = 'Tiket berhasil dibatalkan');
-    } else {
-      _showError(
-        context,
-        context.read<TicketProvider>().error,
-        () => _retryCancel(ticketId),
-      );
     }
   }
 
@@ -1103,71 +1152,49 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
     String? reason;
     if (widget.isAdmin) {
       final controller = TextEditingController();
-      String? validationError;
-      final confirmed = await showDialog<bool>(
+      final confirmed = await showConfirmDialog(
         context: context,
-        builder: (dialogContext) => StatefulBuilder(
-          builder: (context, setDialogState) => AlertDialog(
-            icon: const Icon(Icons.delete_outline, color: AppColors.cancelled),
-            title: const Text('Hapus tiket?'),
-            content: TextField(
+        title: 'Hapus tiket?',
+        confirmLabel: 'Ya, Hapus',
+        icon: Icons.delete_outline,
+        iconColor: AppColors.cancelled,
+        contentBuilder: (context, validationError, clearValidationError) =>
+            Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
               controller: controller,
               maxLength: 300,
               maxLines: 3,
-              decoration: InputDecoration(
-                labelText: 'Alasan penghapusan',
-                errorText: validationError,
+              onChanged: (_) => clearValidationError(),
+              decoration: const InputDecoration(
+                label: RequiredFieldLabel('Alasan penghapusan'),
                 alignLabelWithHint: true,
               ),
-              onChanged: (_) {
-                if (validationError != null) {
-                  setDialogState(() => validationError = null);
-                }
-              },
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext, false),
-                child: const Text('Kembali'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  if (controller.text.trim().isEmpty) {
-                    setDialogState(
-                        () => validationError = 'Alasan wajib diisi.');
-                    return;
-                  }
-                  Navigator.pop(dialogContext, true);
-                },
-                child: const Text('Ya, Hapus'),
-              ),
+            if (validationError != null) ...[
+              const SizedBox(height: 8),
+              AlertBanner(message: validationError),
             ],
-          ),
+          ],
         ),
+        validate: () =>
+            controller.text.trim().isEmpty ? 'Alasan wajib diisi.' : null,
       );
       reason = controller.text.trim();
       controller.dispose();
       if (confirmed != true) return;
     } else {
-      final confirmed = await showDialog<bool>(
+      final confirmed = await showConfirmDialog(
         context: context,
-        builder: (dialogContext) => AlertDialog(
-          icon: const Icon(Icons.delete_outline, color: AppColors.cancelled),
-          title: const Text('Hapus tiket?'),
-          content: const Text(
-            'Tiket dan riwayatnya dihapus permanen dan tidak bisa dikembalikan.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Kembali'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Ya, Hapus'),
-            ),
-          ],
+        title: 'Hapus tiket?',
+        content: const Text(
+          'Tiket dan riwayatnya dihapus permanen dan tidak bisa dikembalikan.',
         ),
+        confirmLabel: 'Ya, Hapus',
+        icon: Icons.delete_outline,
+        iconColor: AppColors.cancelled,
       );
       if (confirmed != true) return;
     }
@@ -1176,35 +1203,28 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
   }
 
   Future<void> _deleteTicket(Ticket ticket, String reason) async {
-    final messenger = ScaffoldMessenger.of(context);
     final router = GoRouter.of(context);
     final provider = context.read<TicketProvider>();
-    final ok = widget.isAdmin
-        ? await provider.deleteTicketAsAdmin(
-            ticket: ticket,
-            admin: context.read<AuthProvider>().user!,
-            reason: reason,
-          )
-        : await provider.deleteOwnTicket(ticket.id);
+    final admin = context.read<AuthProvider>().user;
+    if (admin == null) return;
+    final bool ok;
+    if (widget.isAdmin) {
+      ok = await provider.deleteTicketAsAdmin(
+        ticket: ticket,
+        admin: admin,
+        reason: reason,
+      );
+    } else {
+      ok = await provider.deleteOwnTicket(ticket.id);
+    }
     if (!mounted) return;
     if (ok) {
-      messenger.showSnackBar(
-        SnackBar(
-            content: Text('Tiket ${ticket.ticketNumber} berhasil dihapus')),
-      );
       router.go(
-          widget.isAdmin ? AppRoutes.adminTickets : AppRoutes.employeeTickets);
-    } else {
-      _showError(
-        context,
-        provider.error,
-        () => _retryDelete(ticket, reason),
+        widget.isAdmin ? AppRoutes.adminTickets : AppRoutes.employeeTickets,
+        extra: 'Tiket ${ticket.ticketNumber} berhasil dihapus',
       );
     }
   }
-
-  Future<void> _retryDelete(Ticket ticket, String reason) =>
-      _deleteTicket(ticket, reason);
 }
 
 class ProfileScreen extends StatefulWidget {
@@ -1227,7 +1247,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final user = context.read<AuthProvider>().user!;
+    final user = context.read<AuthProvider>().user;
+    if (user == null) {
+      _loadedUid = null;
+      return;
+    }
     if (_loadedUid != user.uid) {
       _loadedUid = user.uid;
       _name.text = user.name;
@@ -1243,6 +1267,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _save() async {
+    context.read<AuthProvider>().clearError();
     if (_name.text.trim().isEmpty) {
       setState(() {
         _message = 'Nama lengkap wajib diisi.';
@@ -1269,25 +1294,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _logout() async {
-    final shouldLogout = await showDialog<bool>(
+    final shouldLogout = await showConfirmDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        icon: const Icon(Icons.logout, color: AppColors.cancelled),
-        title: const Text('Keluar dari akun?'),
-        content: const Text(
-          'Anda perlu masuk kembali untuk mengakses IT Helpdesk.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Kembali'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Ya, Keluar'),
-          ),
-        ],
+      title: 'Keluar dari akun?',
+      content: const Text(
+        'Anda perlu masuk kembali untuk mengakses IT Helpdesk.',
       ),
+      confirmLabel: 'Ya, Keluar',
+      icon: Icons.logout,
+      iconColor: AppColors.cancelled,
     );
     if (shouldLogout == true && mounted) {
       await context.read<AuthProvider>().signOut();
@@ -1298,7 +1313,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-    final user = auth.user!;
+    final user = auth.user;
+    if (user == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('Profil'),
@@ -1343,8 +1361,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   TextField(
                     controller: _name,
                     textCapitalization: TextCapitalization.words,
-                    decoration:
-                        const InputDecoration(labelText: 'Nama lengkap'),
+                    onChanged: (_) => setState(() => _message = null),
+                    decoration: const InputDecoration(
+                      label: RequiredFieldLabel('Nama lengkap'),
+                    ),
                   ),
                   const SizedBox(height: 13),
                   _ReadOnlyValue(label: 'Email', value: user.email),
@@ -1352,6 +1372,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const SizedBox(height: 13),
                     TextField(
                       controller: _department,
+                      onChanged: (_) => setState(() => _message = null),
                       decoration:
                           const InputDecoration(labelText: 'Departemen'),
                     ),
@@ -1375,28 +1396,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ],
                   const SizedBox(height: 16),
+                  if (_message != null) ...[
+                    AlertBanner(
+                      message: _message!,
+                      variant: _messageIsError
+                          ? AlertBannerVariant.error
+                          : AlertBannerVariant.success,
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   FilledButton(
                     onPressed: _busy ? null : _save,
                     child: Text(
                       _busy ? 'Menyimpan...' : 'Simpan Perubahan',
                     ),
                   ),
-                  if (_message != null) ...[
-                    const SizedBox(height: 10),
-                    Text(
-                      _message!,
-                      style: TextStyle(
-                        color: _messageIsError
-                            ? AppColors.cancelled
-                            : AppColors.completed,
-                      ),
-                    ),
-                    if (_messageIsError)
-                      TextButton(
-                        onPressed: _save,
-                        child: const Text('Coba lagi'),
-                      ),
-                  ],
                 ],
               ),
             ),
@@ -1415,8 +1429,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       bottomNavigationBar: TicketBottomNavigation(
         isAdmin: widget.isAdmin,
-        currentPath:
-            widget.isAdmin ? AppRoutes.adminProfile : AppRoutes.employeeProfile,
       ),
     );
   }
@@ -1445,10 +1457,10 @@ class _TicketForm extends StatefulWidget {
 class _TicketFormState extends State<_TicketForm> {
   final _title = TextEditingController();
   final _description = TextEditingController();
-  final _formKey = GlobalKey<FormState>();
   late String _category = widget.ticket.category;
   late String _priority = widget.ticket.priority;
   bool _busy = false;
+  String? _validationError;
 
   @override
   void initState() {
@@ -1465,7 +1477,17 @@ class _TicketFormState extends State<_TicketForm> {
   }
 
   Future<void> _submit() async {
-    if (_category.isEmpty || !_formKey.currentState!.validate()) return;
+    setState(() => _validationError = null);
+    final provider = context.read<TicketProvider>();
+    provider.clearError();
+    final validationError = _category.isEmpty
+        ? 'Pilih kategori.'
+        : FormValidators.ticketTitle(_title.text) ??
+            FormValidators.ticketDescription(_description.text);
+    if (validationError != null) {
+      setState(() => _validationError = validationError);
+      return;
+    }
     setState(() => _busy = true);
     await widget.onSubmit(
       _title.text,
@@ -1479,95 +1501,110 @@ class _TicketFormState extends State<_TicketForm> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<TicketProvider>();
-    return Form(
-      key: _formKey,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-        children: [
-          if (widget.isEditing) ...[
-            const _InfoStrip(
-              text: 'Tiket dapat diedit karena masih berstatus Menunggu.',
-            ),
-            const SizedBox(height: 16),
-          ],
-          DropdownButtonFormField<String>(
-            initialValue: _category,
-            decoration: const InputDecoration(labelText: 'Kategori'),
-            items: TicketCategories.all
-                .map((value) => DropdownMenuItem(
-                      value: value,
-                      child: Text(value),
-                    ))
-                .toList(),
-            onChanged: (value) {
-              if (value != null) setState(() => _category = value);
-            },
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+      children: [
+        const Text(
+          '* wajib diisi',
+          style: TextStyle(color: AppColors.muted, fontSize: 12),
+        ),
+        const SizedBox(height: 12),
+        if (widget.isEditing) ...[
+          const _InfoStrip(
+            text: 'Tiket dapat diedit karena masih berstatus Menunggu.',
           ),
-          const SizedBox(height: 14),
-          DropdownButtonFormField<String>(
-            initialValue: _priority,
-            decoration: const InputDecoration(labelText: 'Prioritas'),
-            items: TicketPriorities.all
-                .map((value) => DropdownMenuItem(
-                      value: value,
-                      child: Text(value),
-                    ))
-                .toList(),
-            onChanged: (value) {
-              if (value != null) setState(() => _priority = value);
-            },
-          ),
-          const SizedBox(height: 8),
-          const _PriorityHelp(),
-          const SizedBox(height: 14),
-          TextFormField(
-            controller: _title,
-            maxLength: AppConstants.maxTicketTitleLength,
-            decoration: const InputDecoration(
-              labelText: 'Judul kendala',
-              hintText: 'Ringkas dan spesifik',
-            ),
-            validator: FormValidators.ticketTitle,
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _description,
-            minLines: 4,
-            maxLines: 7,
-            maxLength: AppConstants.maxTicketDescriptionLength,
-            decoration: const InputDecoration(
-              labelText: 'Deskripsi',
-              alignLabelWithHint: true,
-            ),
-            validator: FormValidators.ticketDescription,
-          ),
-          if (provider.error != null) ...[
-            const SizedBox(height: 12),
-            _MutationError(
-              message: provider.error!,
-              onRetry: _submit,
-            ),
-          ],
           const SizedBox(height: 16),
-          FilledButton(
-            onPressed: _busy || provider.isBusy ? null : _submit,
-            child: Text(
-              _busy || provider.isBusy
-                  ? 'Menyimpan...'
-                  : widget.isEditing
-                      ? 'Simpan Perubahan'
-                      : 'Kirim Tiket',
-            ),
-          ),
-          if (widget.isEditing)
-            TextButton(
-              onPressed: () => context.go(
-                '/employee/tickets/${widget.ticket.id}',
-              ),
-              child: const Text('Batal'),
-            ),
         ],
-      ),
+        DropdownButtonFormField<String>(
+          initialValue: _category,
+          decoration: const InputDecoration(
+            label: RequiredFieldLabel('Kategori'),
+          ),
+          items: TicketCategories.all
+              .map((value) => DropdownMenuItem(
+                    value: value,
+                    child: Text(value),
+                  ))
+              .toList(),
+          onChanged: (value) {
+            if (value != null) {
+              setState(() {
+                _category = value;
+                _validationError = null;
+              });
+              context.read<TicketProvider>().clearError();
+            }
+          },
+        ),
+        const SizedBox(height: 14),
+        DropdownButtonFormField<String>(
+          initialValue: _priority,
+          decoration: const InputDecoration(
+            label: RequiredFieldLabel('Prioritas'),
+          ),
+          items: TicketPriorities.all
+              .map((value) => DropdownMenuItem(
+                    value: value,
+                    child: Text(value),
+                  ))
+              .toList(),
+          onChanged: (value) {
+            if (value != null) setState(() => _priority = value);
+          },
+        ),
+        const SizedBox(height: 8),
+        const _PriorityHelp(),
+        const SizedBox(height: 14),
+        TextFormField(
+          controller: _title,
+          onChanged: (_) {
+            setState(() => _validationError = null);
+            context.read<TicketProvider>().clearError();
+          },
+          maxLength: AppConstants.maxTicketTitleLength,
+          decoration: const InputDecoration(
+            label: RequiredFieldLabel('Judul kendala'),
+            hintText: 'Ringkas dan spesifik',
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextFormField(
+          controller: _description,
+          onChanged: (_) {
+            setState(() => _validationError = null);
+            context.read<TicketProvider>().clearError();
+          },
+          minLines: 4,
+          maxLines: 7,
+          maxLength: AppConstants.maxTicketDescriptionLength,
+          decoration: const InputDecoration(
+            label: RequiredFieldLabel('Deskripsi'),
+            alignLabelWithHint: true,
+          ),
+        ),
+        if (_validationError != null || provider.error != null) ...[
+          const SizedBox(height: 12),
+          AlertBanner(message: _validationError ?? provider.error!),
+        ],
+        const SizedBox(height: 16),
+        FilledButton(
+          onPressed: _busy || provider.isBusy ? null : _submit,
+          child: Text(
+            _busy || provider.isBusy
+                ? 'Menyimpan...'
+                : widget.isEditing
+                    ? 'Simpan Perubahan'
+                    : 'Kirim Tiket',
+          ),
+        ),
+        if (widget.isEditing)
+          TextButton(
+            onPressed: () => context.go(
+              '/employee/tickets/${widget.ticket.id}',
+            ),
+            child: const Text('Batal'),
+          ),
+      ],
     );
   }
 }
@@ -1738,7 +1775,9 @@ class _AdminActionCardState extends State<_AdminActionCard> {
               const SizedBox(height: 14),
               DropdownButtonFormField<String>(
                 initialValue: _status,
-                decoration: const InputDecoration(labelText: 'Ubah status'),
+                decoration: const InputDecoration(
+                  label: RequiredFieldLabel('Ubah status'),
+                ),
                 items: TicketStatuses.adminOptions
                     .map((status) => DropdownMenuItem(
                           value: status,
@@ -1746,7 +1785,10 @@ class _AdminActionCardState extends State<_AdminActionCard> {
                         ))
                     .toList(),
                 onChanged: (value) {
-                  if (value != null) setState(() => _status = value);
+                  if (value != null) {
+                    setState(() => _status = value);
+                    context.read<TicketProvider>().clearError();
+                  }
                 },
               ),
               const SizedBox(height: 13),
@@ -1754,12 +1796,17 @@ class _AdminActionCardState extends State<_AdminActionCard> {
                 controller: _note,
                 minLines: 3,
                 maxLines: 5,
+                onChanged: (_) => context.read<TicketProvider>().clearError(),
                 decoration: const InputDecoration(
                   labelText: 'Catatan penanganan',
                   alignLabelWithHint: true,
                 ),
               ),
               const SizedBox(height: 14),
+              if (context.watch<TicketProvider>().error != null) ...[
+                AlertBanner(message: context.watch<TicketProvider>().error!),
+                const SizedBox(height: 12),
+              ],
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
@@ -1767,47 +1814,37 @@ class _AdminActionCardState extends State<_AdminActionCard> {
                   child: Text(_busy ? 'Menyimpan...' : 'Simpan Perubahan'),
                 ),
               ),
-              if (context.watch<TicketProvider>().error != null)
-                _MutationError(
-                  message: context.watch<TicketProvider>().error!,
-                  onRetry: () => _save(context),
-                ),
             ],
           ),
         ),
       );
 
   Future<void> _save(BuildContext context) async {
+    context.read<TicketProvider>().clearError();
     if (_status == TicketStatuses.completed &&
         widget.ticket.status != TicketStatuses.completed) {
-      final confirmed = await showDialog<bool>(
+      final confirmed = await showConfirmDialog(
         context: context,
-        builder: (dialogContext) => AlertDialog(
-          icon: const Icon(Icons.check_circle_outline,
-              color: AppColors.completed),
-          title: const Text('Selesaikan tiket?'),
-          content: const Text(
-            'Pastikan kendala pengguna sudah terselesaikan sebelum melanjutkan.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Kembali'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Ya, Selesaikan'),
-            ),
-          ],
+        title: 'Selesaikan tiket?',
+        content: const Text(
+          'Pastikan kendala pengguna sudah terselesaikan sebelum melanjutkan.',
         ),
+        confirmLabel: 'Ya, Selesaikan',
+        icon: Icons.check_circle_outline,
+        iconColor: AppColors.completed,
       );
       if (confirmed != true || !context.mounted) return;
     }
     setState(() => _busy = true);
     final auth = context.read<AuthProvider>();
+    final admin = auth.user;
+    if (admin == null) {
+      if (mounted) setState(() => _busy = false);
+      return;
+    }
     final ok = await context.read<TicketProvider>().handleTicket(
           ticket: widget.ticket,
-          admin: auth.user!,
+          admin: admin,
           status: _status,
           note: _note.text,
         );
@@ -1939,36 +1976,6 @@ class _DetailRow extends StatelessWidget {
       );
 }
 
-class _SuccessBanner extends StatelessWidget {
-  const _SuccessBanner({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: AppColors.completedSoft,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.check_circle_outline, color: AppColors.completed),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                message,
-                style: const TextStyle(
-                  color: AppColors.completed,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-}
-
 class _InfoStrip extends StatelessWidget {
   const _InfoStrip({required this.text});
 
@@ -1994,38 +2001,6 @@ class _InfoStrip extends StatelessWidget {
           ],
         ),
       );
-}
-
-class _MutationError extends StatelessWidget {
-  const _MutationError({required this.message, required this.onRetry});
-
-  final String message;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            message,
-            style: const TextStyle(color: AppColors.cancelled, fontSize: 12),
-          ),
-          TextButton(onPressed: onRetry, child: const Text('Coba lagi')),
-        ],
-      );
-}
-
-void _showError(
-  BuildContext context,
-  String? error,
-  VoidCallback onRetry,
-) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(error ?? 'Perubahan tidak berhasil disimpan.'),
-      action: SnackBarAction(label: 'Coba lagi', onPressed: onRetry),
-    ),
-  );
 }
 
 String _firstName(String name) =>

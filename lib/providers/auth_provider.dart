@@ -25,11 +25,13 @@ class AuthProvider extends ChangeNotifier {
     );
   }
 
-  AuthProvider.forTesting()
+  AuthProvider.forTesting({AppUser? user, String companyName = ''})
       : _authService = null,
         _userService = null {
     _subscription = const Stream<User?>.empty().listen((_) {});
-    _status = AuthStatus.signedOut;
+    _user = user;
+    _companyName = companyName;
+    _status = user == null ? AuthStatus.signedOut : AuthStatus.signedIn;
   }
 
   final AuthService? _authService;
@@ -252,7 +254,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
-    await _authService!.signOut();
+    await _authService?.signOut();
     _user = null;
     _status = AuthStatus.signedOut;
     _error = null;

@@ -9,6 +9,31 @@ abstract final class AppConstants {
   static const maxTicketTitleLength = 100;
   static const maxTicketDescriptionLength = 1000;
   static const minimumPasswordLength = 8;
+  // Add company email providers here when they need to be accepted.
+  static const allowedEmailDomains = [
+    'gmail.com',
+    'googlemail.com',
+    'yahoo.com',
+    'yahoo.co.id',
+    'ymail.com',
+    'outlook.com',
+    'hotmail.com',
+    'live.com',
+    'msn.com',
+    'icloud.com',
+    'me.com',
+    'proton.me',
+    'protonmail.com',
+  ];
+  static const allowedEmailDomainSuffixes = [
+    '.ac.id',
+    '.sch.id',
+    '.go.id',
+    '.co.id',
+  ];
+  static const unsupportedRegistrationEmailMessage =
+      'Gunakan email dari penyedia yang didukung, misalnya Gmail, Yahoo, '
+      'Outlook, atau iCloud. Email sementara tidak diterima.';
   static final emailVerificationEnforcedFrom =
       DateTime.utc(2026, 10, 29, 15, 30);
 }
