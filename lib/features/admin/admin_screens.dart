@@ -75,6 +75,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             return ListView(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
               children: [
+                OfflineModeBanner(
+                  isOffline: context.watch<TicketProvider>().isOffline,
+                ),
+                if (context.read<TicketProvider>().isOffline)
+                  const SizedBox(height: 8),
                 if (context.watch<TicketProvider>().countsError != null) ...[
                   RetryableAlertBanner(
                     message: context.watch<TicketProvider>().countsError!,
@@ -312,6 +317,12 @@ class _AdminTicketsScreenState extends State<AdminTicketsScreen> {
           }).toList();
           return Column(
             children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+                child: OfflineModeBanner(
+                  isOffline: context.watch<TicketProvider>().isOffline,
+                ),
+              ),
               if (successMessage != null)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
@@ -505,6 +516,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<TicketProvider>();
     if (context.watch<AuthProvider>().user == null) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
@@ -516,253 +528,255 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     return Scaffold(
-        appBar: AppBar(
-          title: const Text('Laporan'),
-          bottom: const PreferredSize(
-            preferredSize: Size.fromHeight(22),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Padding(
-                padding: EdgeInsets.only(left: 20, bottom: 11),
-                child: Text(
-                  'Performa layanan IT perusahaan',
-                  style: TextStyle(color: AppColors.muted, fontSize: 12),
-                ),
+      appBar: AppBar(
+        title: const Text('Laporan'),
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(22),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: EdgeInsets.only(left: 20, bottom: 11),
+              child: Text(
+                'Performa layanan IT perusahaan',
+                style: TextStyle(color: AppColors.muted, fontSize: 12),
               ),
             ),
           ),
         ),
-        body: FutureBuilder<_ReportData?>(
-          future: _report,
-          builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              return ErrorState(
-                message: 'Laporan gagal dimuat.',
-                onRetry: () => setState(_loadReport),
-              );
-            }
-            if (!snapshot.hasData &&
-                snapshot.connectionState != ConnectionState.done) {
-              return const LoadingState();
-            }
-            final data = snapshot.data;
-            if (data == null) {
-              final error = context.watch<TicketProvider>().error;
-              return ErrorState(
-                message: error ?? 'Laporan gagal dimuat.',
-                onRetry: () => setState(_loadReport),
-              );
-            }
-            final tickets = data.current;
-            final categories = {
-              for (final category in TicketCategories.all) category: 0,
-            };
-            for (final ticket in tickets) {
-              categories.update(
-                ticket.category,
-                (count) => count + 1,
-                ifAbsent: () => 1,
-              );
-            }
-            final orderedCategories = categories.entries.toList()
-              ..sort((a, b) => b.value.compareTo(a.value));
-            final maxCategory =
-                orderedCategories.isEmpty ? 0 : orderedCategories.first.value;
-            final topCategory =
-                orderedCategories.isEmpty ? null : orderedCategories.first;
-            final previousCount = data.previous.length;
-            final percentage = previousCount == 0
-                ? null
-                : ((tickets.length - previousCount) / previousCount * 100)
-                    .round();
-            final endInclusive =
-                endExclusive.subtract(const Duration(days: 1));
-            final statuses = {
-              for (final status in TicketStatuses.all)
-                status:
-                    tickets.where((ticket) => ticket.status == status).length,
-            };
-            return ListView(
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 26),
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _pickRange,
-                  icon: const Icon(Icons.calendar_month_outlined),
-                  label: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Rentang tanggal',
-                              style: TextStyle(
-                                color: AppColors.muted,
-                                fontSize: 10,
-                              ),
+      ),
+      body: FutureBuilder<_ReportData?>(
+        future: _report,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return ErrorState(
+              message: 'Laporan gagal dimuat.',
+              onRetry: () => setState(_loadReport),
+            );
+          }
+          if (!snapshot.hasData &&
+              snapshot.connectionState != ConnectionState.done) {
+            return const LoadingState();
+          }
+          final data = snapshot.data;
+          if (data == null) {
+            final error = context.watch<TicketProvider>().error;
+            return ErrorState(
+              message: error ?? 'Laporan gagal dimuat.',
+              onRetry: () => setState(_loadReport),
+            );
+          }
+          final tickets = data.current;
+          final categories = {
+            for (final category in TicketCategories.all) category: 0,
+          };
+          for (final ticket in tickets) {
+            categories.update(
+              ticket.category,
+              (count) => count + 1,
+              ifAbsent: () => 1,
+            );
+          }
+          final orderedCategories = categories.entries.toList()
+            ..sort((a, b) => b.value.compareTo(a.value));
+          final maxCategory =
+              orderedCategories.isEmpty ? 0 : orderedCategories.first.value;
+          final topCategory =
+              orderedCategories.isEmpty ? null : orderedCategories.first;
+          final previousCount = data.previous.length;
+          final percentage = previousCount == 0
+              ? null
+              : ((tickets.length - previousCount) / previousCount * 100)
+                  .round();
+          final endInclusive = endExclusive.subtract(const Duration(days: 1));
+          final statuses = {
+            for (final status in TicketStatuses.all)
+              status: tickets.where((ticket) => ticket.status == status).length,
+          };
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 26),
+            children: [
+              if (provider.isOffline) ...[
+                const OfflineModeBanner(isOffline: true),
+                const SizedBox(height: 8),
+              ],
+              OutlinedButton.icon(
+                onPressed: provider.isOffline ? null : _pickRange,
+                icon: const Icon(Icons.calendar_month_outlined),
+                label: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Rentang tanggal',
+                            style: TextStyle(
+                              color: AppColors.muted,
+                              fontSize: 10,
                             ),
-                            Text(
-                              formatIndonesianDateRange(
-                                start,
-                                endInclusive,
-                              ),
-                              style: const TextStyle(color: AppColors.text),
+                          ),
+                          Text(
+                            formatIndonesianDateRange(
+                              start,
+                              endInclusive,
                             ),
-                          ],
-                        ),
+                            style: const TextStyle(color: AppColors.text),
+                          ),
+                        ],
                       ),
-                      const Icon(Icons.chevron_right),
-                    ],
+                    ),
+                    const Icon(Icons.chevron_right),
+                  ],
+                ),
+              ),
+              if (tickets.isEmpty)
+                const SizedBox(
+                  height: 190,
+                  child: EmptyState(
+                    title: 'Belum ada laporan',
+                    message:
+                        'Tidak ada tiket pada rentang tanggal yang dipilih.',
                   ),
                 ),
-                if (tickets.isEmpty)
-                  const SizedBox(
-                    height: 190,
-                    child: EmptyState(
-                      title: 'Belum ada laporan',
-                      message:
-                          'Tidak ada tiket pada rentang tanggal yang dipilih.',
-                    ),
+              Container(
+                margin: const EdgeInsets.only(top: 14, bottom: 4),
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [AppColors.primary, AppColors.primaryDark],
                   ),
-                Container(
-                  margin: const EdgeInsets.only(top: 14, bottom: 4),
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [AppColors.primary, AppColors.primaryDark],
-                    ),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Total tiket',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: .76),
-                        ),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Total tiket',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: .76),
                       ),
+                    ),
+                    Text(
+                      '${tickets.length}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 32,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    if (percentage != null)
                       Text(
-                        '${tickets.length}',
+                        '${percentage >= 0 ? '+' : ''}$percentage% dibanding periode sebelumnya',
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 32,
-                          fontWeight: FontWeight.w800,
+                          fontSize: 11,
                         ),
-                      ),
-                      if (percentage != null)
-                        Text(
-                          '${percentage >= 0 ? '+' : ''}$percentage% dibanding periode sebelumnya',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                const SectionHeading(title: 'Ringkasan status'),
-                GridView(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    mainAxisExtent: 112,
-                    crossAxisSpacing: 9,
-                    mainAxisSpacing: 9,
-                  ),
-                  children: [
-                    for (final status in TicketStatuses.all)
-                      StatusSummaryCard(
-                        status: status,
-                        count: statuses[status] ?? 0,
                       ),
                   ],
                 ),
-                Card(
-                  margin: const EdgeInsets.only(top: 16),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
+              ),
+              const SectionHeading(title: 'Ringkasan status'),
+              GridView(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  mainAxisExtent: 112,
+                  crossAxisSpacing: 9,
+                  mainAxisSpacing: 9,
+                ),
+                children: [
+                  for (final status in TicketStatuses.all)
+                    StatusSummaryCard(
+                      status: status,
+                      count: statuses[status] ?? 0,
+                    ),
+                ],
+              ),
+              Card(
+                margin: const EdgeInsets.only(top: 16),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Kategori terbanyak',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                          Text(
+                            '${tickets.length} tiket',
+                            style: const TextStyle(
+                              color: AppColors.muted,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      for (final category in orderedCategories) ...[
                         Row(
                           children: [
-                            const Expanded(
-                              child: Text(
-                                'Kategori terbanyak',
-                                style: TextStyle(fontWeight: FontWeight.w700),
-                              ),
-                            ),
-                            Text(
-                              '${tickets.length} tiket',
-                              style: const TextStyle(
-                                color: AppColors.muted,
-                                fontSize: 10,
-                              ),
-                            ),
+                            Expanded(child: Text(category.key)),
+                            Text('${category.value}'),
                           ],
                         ),
-                        const SizedBox(height: 16),
-                        for (final category in orderedCategories) ...[
-                          Row(
-                            children: [
-                              Expanded(child: Text(category.key)),
-                              Text('${category.value}'),
-                            ],
+                        const SizedBox(height: 6),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: LinearProgressIndicator(
+                            value: maxCategory == 0
+                                ? 0
+                                : category.value / maxCategory,
+                            minHeight: 7,
+                            backgroundColor: const Color(0xFFEDF1F6),
                           ),
-                          const SizedBox(height: 6),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: LinearProgressIndicator(
-                              value: maxCategory == 0
-                                  ? 0
-                                  : category.value / maxCategory,
-                              minHeight: 7,
-                              backgroundColor: const Color(0xFFEDF1F6),
-                            ),
-                          ),
-                          const SizedBox(height: 14),
-                        ],
+                        ),
+                        const SizedBox(height: 14),
                       ],
-                    ),
+                    ],
                   ),
                 ),
-                if (tickets.isNotEmpty && topCategory != null)
-                  Container(
-                    margin: const EdgeInsets.only(top: 12),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: AppColors.primarySoft,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.bar_chart_outlined,
-                          color: AppColors.primary,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            '${topCategory.key} paling sering dilaporkan — ${(topCategory.value / tickets.length * 100).round()}% dari total tiket pada periode ini.',
-                            style: const TextStyle(
-                              color: AppColors.primary,
-                              fontSize: 12,
-                            ),
+              ),
+              if (tickets.isNotEmpty && topCategory != null)
+                Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.primarySoft,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.bar_chart_outlined,
+                        color: AppColors.primary,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          '${topCategory.key} paling sering dilaporkan — ${(topCategory.value / tickets.length * 100).round()}% dari total tiket pada periode ini.',
+                          style: const TextStyle(
+                            color: AppColors.primary,
+                            fontSize: 12,
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-              ],
-            );
-          },
-        ),
-        bottomNavigationBar: const TicketBottomNavigation(
-          isAdmin: true,
-        ),
-      );
+                ),
+            ],
+          );
+        },
+      ),
+      bottomNavigationBar: const TicketBottomNavigation(
+        isAdmin: true,
+      ),
+    );
   }
 }
 

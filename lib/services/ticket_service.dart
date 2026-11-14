@@ -14,6 +14,8 @@ class TicketService {
   CollectionReference<Map<String, dynamic>> get _tickets =>
       _firestore.collection(AppConstants.ticketsCollection);
 
+  String newTicketId() => _tickets.doc().id;
+
   Stream<List<Ticket>> watchTickets({
     required String? userId,
     required String? companyId,
@@ -26,6 +28,20 @@ class TicketService {
           .map((snapshot) => snapshot.docs
               .map((document) => Ticket.fromMap(document.id, document.data()))
               .toList());
+
+  Future<List<Ticket>> fetchTickets({
+    required String? userId,
+    required String? companyId,
+  }) async {
+    final snapshot = await _tickets
+        .where(userId == null ? 'companyId' : 'userId',
+            isEqualTo: userId ?? companyId)
+        .orderBy('createdAt', descending: true)
+        .get();
+    return snapshot.docs
+        .map((document) => Ticket.fromMap(document.id, document.data()))
+        .toList();
+  }
 
   Stream<Ticket?> watchTicket(String id) => _tickets.doc(id).snapshots().map(
         (snapshot) => snapshot.exists && snapshot.data() != null
@@ -51,8 +67,10 @@ class TicketService {
     required String description,
     required String category,
     required String priority,
+    String? ticketId,
   }) async {
-    final reference = _tickets.doc();
+    final reference =
+        ticketId == null ? _tickets.doc() : _tickets.doc(ticketId);
     final now = FieldValue.serverTimestamp();
     await reference.set({
       'ticketNumber': ticketNumberForId(reference.id),
@@ -69,6 +87,14 @@ class TicketService {
       'resolvedAt': null,
     });
     return reference.id;
+  }
+
+  Future<Ticket?> getTicket(String ticketId) async {
+    final snapshot = await _tickets.doc(ticketId).get();
+    final data = snapshot.data();
+    return snapshot.exists && data != null
+        ? Ticket.fromMap(snapshot.id, data)
+        : null;
   }
 
   Future<void> editTicket({

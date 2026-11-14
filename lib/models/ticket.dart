@@ -16,6 +16,8 @@ class Ticket {
     required this.createdAt,
     required this.updatedAt,
     this.resolvedAt,
+    this.syncStatus = TicketSyncStatus.idle,
+    this.syncError,
   });
 
   final String id;
@@ -31,8 +33,39 @@ class Ticket {
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final DateTime? resolvedAt;
+  final TicketSyncStatus syncStatus;
+  final String? syncError;
 
   bool get canEdit => status == TicketStatuses.waiting;
+
+  Ticket copyWith({
+    String? title,
+    String? description,
+    String? category,
+    String? priority,
+    String? status,
+    DateTime? updatedAt,
+    TicketSyncStatus? syncStatus,
+    String? syncError,
+    bool clearSyncError = false,
+  }) =>
+      Ticket(
+        id: id,
+        ticketNumber: ticketNumber,
+        title: title ?? this.title,
+        description: description ?? this.description,
+        category: category ?? this.category,
+        priority: priority ?? this.priority,
+        status: status ?? this.status,
+        userId: userId,
+        userName: userName,
+        companyId: companyId,
+        createdAt: createdAt,
+        updatedAt: updatedAt ?? this.updatedAt,
+        resolvedAt: resolvedAt,
+        syncStatus: syncStatus ?? this.syncStatus,
+        syncError: clearSyncError ? null : syncError ?? this.syncError,
+      );
 
   factory Ticket.fromMap(String id, Map<String, dynamic> map) => Ticket(
         id: id,
@@ -68,6 +101,8 @@ class Ticket {
   static String ticketNumberForId(String documentId) =>
       'HD-${documentId.substring(0, documentId.length < 6 ? documentId.length : 6).toUpperCase()}';
 }
+
+enum TicketSyncStatus { idle, pending, sent, failed }
 
 String ticketNumberForId(String documentId) =>
     Ticket.ticketNumberForId(documentId);

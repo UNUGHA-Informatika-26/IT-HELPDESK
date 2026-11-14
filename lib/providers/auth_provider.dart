@@ -25,9 +25,13 @@ class AuthProvider extends ChangeNotifier {
     );
   }
 
-  AuthProvider.forTesting({AppUser? user, String companyName = ''})
+  AuthProvider.forTesting({
+    AppUser? user,
+    String companyName = '',
+    UserService? userService,
+  })
       : _authService = null,
-        _userService = null {
+        _userService = userService {
     _subscription = const Stream<User?>.empty().listen((_) {});
     _user = user;
     _companyName = companyName;

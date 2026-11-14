@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 
 import '../core/constants/app_constants.dart';
 import '../core/theme/app_theme.dart';
 import '../core/utils/date_formatter.dart';
 import '../models/ticket.dart';
+import '../features/connectivity/connectivity_cubit.dart';
 
 enum AlertBannerVariant { error, success, info }
 
@@ -84,6 +86,64 @@ class RetryableAlertBanner extends StatelessWidget {
           ),
         ],
       );
+}
+
+class OfflineModeBanner extends StatelessWidget {
+  const OfflineModeBanner({super.key, this.isOffline});
+
+  final bool? isOffline;
+
+  @override
+  Widget build(BuildContext context) {
+    final offline = isOffline ??
+        context.watch<ConnectivityCubit>().state == ConnectivityStatus.offline;
+    if (!offline) return const SizedBox.shrink();
+    return const AlertBanner(
+      message: 'Mode offline - menampilkan data tersimpan.',
+      variant: AlertBannerVariant.info,
+    );
+  }
+}
+
+class TicketSyncIndicator extends StatelessWidget {
+  const TicketSyncIndicator({
+    super.key,
+    required this.status,
+    this.onRetry,
+  });
+
+  final TicketSyncStatus status;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, color, label) = switch (status) {
+      TicketSyncStatus.idle => (Icons.done, AppColors.muted, 'Terkirim'),
+      TicketSyncStatus.pending => (
+          Icons.schedule,
+          AppColors.muted,
+          'Menunggu kirim'
+        ),
+      TicketSyncStatus.sent => (Icons.done, AppColors.completed, 'Terkirim'),
+      TicketSyncStatus.failed => (
+          Icons.error_outline,
+          AppColors.cancelled,
+          'Gagal dikirim'
+        ),
+    };
+    final iconWidget = Icon(icon, size: 16, color: color);
+    if (status != TicketSyncStatus.failed || onRetry == null) {
+      return Tooltip(message: label, child: iconWidget);
+    }
+    return IconButton(
+      tooltip: '$label. Ketuk untuk coba kirim lagi',
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+      onPressed: onRetry,
+      icon: iconWidget,
+    );
+  }
 }
 
 class RequiredFieldLabel extends StatelessWidget {
@@ -365,11 +425,13 @@ class TicketCard extends StatelessWidget {
     required this.ticket,
     this.showReporter = false,
     this.onTap,
+    this.onRetry,
   });
 
   final Ticket ticket;
   final bool showReporter;
   final VoidCallback? onTap;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) => Card(
@@ -461,6 +523,13 @@ class TicketCard extends StatelessWidget {
                               ),
                             ),
                           ),
+                          if (ticket.syncStatus != TicketSyncStatus.idle) ...[
+                            const SizedBox(width: 4),
+                            TicketSyncIndicator(
+                              status: ticket.syncStatus,
+                              onRetry: onRetry,
+                            ),
+                          ],
                         ],
                       ),
                     ],
@@ -488,6 +557,7 @@ class TicketPermissionActions extends StatelessWidget {
     required this.onEdit,
     required this.onCancel,
     required this.adminActionBuilder,
+    this.isOnline = true,
   });
 
   final Ticket ticket;
@@ -496,6 +566,7 @@ class TicketPermissionActions extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onCancel;
   final Widget Function() adminActionBuilder;
+  final bool isOnline;
 
   @override
   Widget build(BuildContext context) {
@@ -531,34 +602,53 @@ class TicketPermissionActions extends StatelessWidget {
           ),
         );
       }
-      return adminActionBuilder();
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (!isOnline) ...[
+            const AlertBanner(
+                message: 'Aksi ini membutuhkan koneksi internet.'),
+            const SizedBox(height: 8),
+          ],
+          adminActionBuilder(),
+        ],
+      );
     }
 
     if (!isOwner || ticket.status != TicketStatuses.waiting) {
       return const SizedBox.shrink();
     }
-    return Padding(
-      padding: const EdgeInsets.only(top: 14),
-      child: Row(
-        children: [
-          Expanded(
-            child: TicketActionButton(
-              label: 'Edit',
-              icon: Icons.edit_outlined,
-              onPressed: onEdit,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: TicketActionButton(
-              label: 'Batalkan',
-              icon: Icons.cancel_outlined,
-              color: AppColors.cancelled,
-              onPressed: onCancel,
-            ),
-          ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (!isOnline) ...[
+          const AlertBanner(message: 'Aksi ini membutuhkan koneksi internet.'),
+          const SizedBox(height: 8),
         ],
-      ),
+        Padding(
+          padding: const EdgeInsets.only(top: 14),
+          child: Row(
+            children: [
+              Expanded(
+                child: TicketActionButton(
+                  label: 'Edit',
+                  icon: Icons.edit_outlined,
+                  onPressed: isOnline ? onEdit : null,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TicketActionButton(
+                  label: 'Batalkan',
+                  icon: Icons.cancel_outlined,
+                  color: AppColors.cancelled,
+                  onPressed: isOnline ? onCancel : null,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

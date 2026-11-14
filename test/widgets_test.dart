@@ -1,18 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:it_helpdesk_flutter/core/constants/app_constants.dart';
 import 'package:it_helpdesk_flutter/core/theme/app_theme.dart';
+import 'package:it_helpdesk_flutter/data/local/local_cache.dart';
 import 'package:it_helpdesk_flutter/features/admin/admin_screens.dart';
 import 'package:it_helpdesk_flutter/features/auth/auth_screens.dart';
 import 'package:it_helpdesk_flutter/features/employee/employee_screens.dart';
+import 'package:it_helpdesk_flutter/features/connectivity/connectivity_cubit.dart';
 import 'package:it_helpdesk_flutter/models/app_user.dart';
 import 'package:it_helpdesk_flutter/models/ticket.dart';
+import 'package:it_helpdesk_flutter/models/ticket_update.dart';
 import 'package:it_helpdesk_flutter/providers/auth_provider.dart';
 import 'package:it_helpdesk_flutter/providers/ticket_provider.dart';
 import 'package:it_helpdesk_flutter/services/ticket_service.dart';
+import 'package:it_helpdesk_flutter/services/user_service.dart';
 import 'package:it_helpdesk_flutter/widgets/helpdesk_widgets.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
@@ -35,12 +40,22 @@ class _TestTicketService extends TicketService {
   Stream<Ticket?> watchTicket(String id) => Stream.value(ticket);
 
   @override
+  Stream<List<TicketUpdate>> watchUpdates(String ticketId) => Stream.value([]);
+
+  @override
   Future<int> countTickets({
     required String? userId,
     required String? companyId,
     required String status,
   }) async =>
       0;
+}
+
+class _TestUserService extends UserService {
+  _TestUserService() : super(firestore: _MockFirestore());
+
+  @override
+  Future<AppUser?> getUser(String uid) async => null;
 }
 
 class _FailingCountTicketService extends _TestTicketService {
@@ -92,6 +107,7 @@ void main() {
       () async {
     final provider = TicketProvider(
       ticketService: _FailingCountTicketService(_ticket()),
+      localCache: const NoopLocalCache(),
     );
     addTearDown(provider.dispose);
 
@@ -129,6 +145,7 @@ void main() {
           ChangeNotifierProvider(
             create: (_) => TicketProvider(
               ticketService: _TestTicketService(_ticket()),
+              localCache: const NoopLocalCache(),
             ),
           ),
         ],
@@ -506,8 +523,10 @@ void main() {
       (tester) async {
     for (final isAdmin in [false, true]) {
       final path = isAdmin ? AppRoutes.adminTickets : AppRoutes.employeeTickets;
-      final ticketProvider =
-          TicketProvider(ticketService: _TestTicketService(_ticket()));
+      final ticketProvider = TicketProvider(
+        ticketService: _TestTicketService(_ticket()),
+        localCache: const NoopLocalCache(),
+      );
       final authProvider =
           AuthProvider.forTesting(user: _user(isAdmin: isAdmin));
       final router = GoRouter(
@@ -547,8 +566,10 @@ void main() {
 
   testWidgets('ticket create and edit dropdowns use ticket values',
       (tester) async {
-    final ticketProvider =
-        TicketProvider(ticketService: _TestTicketService(_ticket()));
+    final ticketProvider = TicketProvider(
+      ticketService: _TestTicketService(_ticket()),
+      localCache: const NoopLocalCache(),
+    );
     final authProvider = AuthProvider.forTesting(user: _user());
     await tester.pumpWidget(
       MultiProvider(
@@ -623,6 +644,40 @@ void main() {
     expect(chevron.right, closeTo(card.right - 15, 2));
   });
 
+  testWidgets('offline banner and WhatsApp-style sync indicators are visible',
+      (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Column(
+          children: [
+            OfflineModeBanner(isOffline: true),
+            TicketSyncIndicator(status: TicketSyncStatus.pending),
+            TicketSyncIndicator(status: TicketSyncStatus.sent),
+            TicketSyncIndicator(status: TicketSyncStatus.failed),
+          ],
+        ),
+      ),
+    );
+
+    expect(find.text('Mode offline - menampilkan data tersimpan.'),
+        findsOneWidget);
+    expect(find.byIcon(Icons.schedule), findsOneWidget);
+    expect(find.byIcon(Icons.done), findsOneWidget);
+    expect(find.byIcon(Icons.error_outline), findsOneWidget);
+  });
+
+  testWidgets('offline banner follows ConnectivityCubit state', (tester) async {
+    await tester.pumpWidget(
+      BlocProvider(
+        create: (_) =>
+            ConnectivityCubit.forTesting(initial: ConnectivityStatus.offline),
+        child: const MaterialApp(home: Scaffold(body: OfflineModeBanner())),
+      ),
+    );
+
+    expect(find.text('Mode offline - menampilkan data tersimpan.'), findsOneWidget);
+  });
+
   testWidgets('PriorityBadge supports CITO, Segera, and Biasa', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(
@@ -665,6 +720,86 @@ void main() {
     expect(tester.widgetList<OutlinedButton>(buttons), hasLength(2));
     expect(tester.getRect(buttons.at(0)).height, 48);
     expect(tester.getRect(buttons.at(1)).height, 48);
+  });
+
+  testWidgets('employee ticket actions are disabled while offline',
+      (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TicketPermissionActions(
+            ticket: _ticket(),
+            isAdmin: false,
+            isOwner: true,
+            isOnline: false,
+            onEdit: () {},
+            onCancel: () {},
+            adminActionBuilder: () => const SizedBox.shrink(),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      find.text('Aksi ini membutuhkan koneksi internet.'),
+      findsOneWidget,
+    );
+    expect(
+        tester
+            .widget<OutlinedButton>(find.byType(OutlinedButton).first)
+            .onPressed,
+        isNull);
+  });
+
+  testWidgets('admin status and delete actions are disabled while offline',
+      (tester) async {
+    final authProvider = AuthProvider.forTesting(
+      user: _user(isAdmin: true),
+      userService: _TestUserService(),
+    );
+    final ticketProvider = TicketProvider(
+      ticketService: _TestTicketService(_ticket()),
+      localCache: const NoopLocalCache(),
+    )..setConnectivity(ConnectivityStatus.offline);
+    addTearDown(authProvider.dispose);
+    addTearDown(ticketProvider.dispose);
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
+          ChangeNotifierProvider<TicketProvider>.value(value: ticketProvider),
+        ],
+        child: const MaterialApp(
+          home: TicketDetailScreen(
+            ticketId: 'a1b2c3ticket',
+            isAdmin: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView), const Offset(0, -1000));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Aksi ini membutuhkan koneksi internet.'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Simpan Perubahan'),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<TicketActionButton>(
+            find.widgetWithText(TicketActionButton, 'Hapus tiket'),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('Edit and Batalkan are hidden for non-waiting tickets',
