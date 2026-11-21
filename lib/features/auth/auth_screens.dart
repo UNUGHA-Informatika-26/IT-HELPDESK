@@ -76,7 +76,7 @@ class SplashScreen extends StatelessWidget {
                       backgroundColor: Colors.white,
                       foregroundColor: AppColors.primary,
                     ),
-                    onPressed: () => context.go(AppRoutes.onboarding),
+                    onPressed: () => context.push(AppRoutes.onboarding),
                     child: const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -402,7 +402,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               alignment: Alignment.centerRight,
                               child: TextButton(
                                 onPressed: () =>
-                                    context.go(AppRoutes.resetPassword),
+                                    context.push(AppRoutes.resetPassword),
                                 child: const Text('Lupa Password?'),
                               ),
                             ),
@@ -428,7 +428,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   style: TextStyle(color: AppColors.muted),
                                 ),
                                 GestureDetector(
-                                  onTap: () => context.go(AppRoutes.register),
+                                  onTap: () => context.push(AppRoutes.register),
                                   child: const Text(
                                     'Daftar',
                                     style: TextStyle(
@@ -766,11 +766,17 @@ class AccessDeniedScreen extends StatelessWidget {
               ),
               const SizedBox(height: 28),
               FilledButton(
-                onPressed: () => context.go(
-                  user?.isAdmin == true
-                      ? AppRoutes.adminHome
-                      : AppRoutes.employeeHome,
-                ),
+                onPressed: () {
+                  if (context.canPop()) {
+                    context.pop();
+                  } else {
+                    context.go(
+                      user?.isAdmin == true
+                          ? AppRoutes.adminHome
+                          : AppRoutes.employeeHome,
+                    );
+                  }
+                },
                 child: const Text('Kembali ke Beranda'),
               ),
             ],

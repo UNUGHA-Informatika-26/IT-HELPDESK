@@ -11,11 +11,14 @@ import 'package:it_helpdesk_flutter/features/admin/admin_screens.dart';
 import 'package:it_helpdesk_flutter/features/auth/auth_screens.dart';
 import 'package:it_helpdesk_flutter/features/employee/employee_screens.dart';
 import 'package:it_helpdesk_flutter/features/connectivity/connectivity_cubit.dart';
+import 'package:it_helpdesk_flutter/models/app_notification.dart';
 import 'package:it_helpdesk_flutter/models/app_user.dart';
 import 'package:it_helpdesk_flutter/models/ticket.dart';
 import 'package:it_helpdesk_flutter/models/ticket_update.dart';
 import 'package:it_helpdesk_flutter/providers/auth_provider.dart';
+import 'package:it_helpdesk_flutter/providers/notification_provider.dart';
 import 'package:it_helpdesk_flutter/providers/ticket_provider.dart';
+import 'package:it_helpdesk_flutter/services/notification_service.dart';
 import 'package:it_helpdesk_flutter/services/ticket_service.dart';
 import 'package:it_helpdesk_flutter/services/user_service.dart';
 import 'package:it_helpdesk_flutter/widgets/helpdesk_widgets.dart';
@@ -56,6 +59,23 @@ class _TestUserService extends UserService {
 
   @override
   Future<AppUser?> getUser(String uid) async => null;
+}
+
+class _TestNotificationService extends NotificationService {
+  _TestNotificationService() : super(firestore: _MockFirestore());
+
+  @override
+  Stream<List<AppNotification>> watchNotifications(String uid) =>
+      Stream.value([]);
+}
+
+class _SuccessfulProfileUserService extends _TestUserService {
+  @override
+  Future<void> updateProfile({
+    required AppUser user,
+    required String name,
+    String? department,
+  }) async {}
 }
 
 class _FailingCountTicketService extends _TestTicketService {
@@ -620,6 +640,164 @@ void main() {
     authProvider.dispose();
   });
 
+  testWidgets('selecting Lainnya shows and resets the required item field',
+      (tester) async {
+    final ticketProvider = TicketProvider(
+      ticketService: _TestTicketService(_ticket()),
+      localCache: const NoopLocalCache(),
+    );
+    final authProvider = AuthProvider.forTesting(user: _user());
+    addTearDown(ticketProvider.dispose);
+    addTearDown(authProvider.dispose);
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<TicketProvider>.value(value: ticketProvider),
+          ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
+        ],
+        child: const MaterialApp(home: CreateTicketScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('custom-category-description')),
+      findsNothing,
+    );
+    await tester.tap(find.byKey(const ValueKey('ticket-category')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(TicketCategories.other).last);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('custom-category-description')),
+      findsOneWidget,
+    );
+
+    await tester.enterText(
+      find.byKey(const ValueKey('custom-category-description')),
+      'Proyektor',
+    );
+    await tester.tap(find.byKey(const ValueKey('ticket-category')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(TicketCategories.printer).last);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('custom-category-description')),
+      findsNothing,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('ticket-category')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(TicketCategories.other).last);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextFormField>(
+            find.byKey(const ValueKey('custom-category-description')),
+          )
+          .controller!
+          .text,
+      isEmpty,
+    );
+  });
+
+  testWidgets('dashboard avatar opens Profile and selects its tab',
+      (tester) async {
+    final ticketProvider = TicketProvider(
+      ticketService: _TestTicketService(_ticket()),
+      localCache: const NoopLocalCache(),
+    );
+    final authProvider = AuthProvider.forTesting(user: _user());
+    final notificationProvider = NotificationProvider(
+      authProvider: authProvider,
+      notificationService: _TestNotificationService(),
+    );
+    final router = GoRouter(
+      initialLocation: AppRoutes.employeeHome,
+      routes: [
+        GoRoute(
+          path: AppRoutes.employeeHome,
+          builder: (context, state) => const EmployeeDashboardScreen(),
+        ),
+        GoRoute(
+          path: AppRoutes.employeeProfile,
+          builder: (context, state) => const ProfileScreen(isAdmin: false),
+        ),
+      ],
+    );
+    addTearDown(ticketProvider.dispose);
+    addTearDown(authProvider.dispose);
+    addTearDown(notificationProvider.dispose);
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<TicketProvider>.value(value: ticketProvider),
+          ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
+          ChangeNotifierProvider<NotificationProvider>.value(
+            value: notificationProvider,
+          ),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('employee-dashboard-profile-avatar')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ProfileScreen), findsOneWidget);
+    expect(
+      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      2,
+    );
+  });
+
+  testWidgets('profile save is enabled only while values differ from baseline',
+      (tester) async {
+    final authProvider = AuthProvider.forTesting(
+      user: _user(),
+      userService: _SuccessfulProfileUserService(),
+    );
+    final router = GoRouter(
+      initialLocation: AppRoutes.employeeProfile,
+      routes: [
+        GoRoute(
+          path: AppRoutes.employeeProfile,
+          builder: (context, state) => const ProfileScreen(isAdmin: false),
+        ),
+      ],
+    );
+    addTearDown(authProvider.dispose);
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AuthProvider>.value(
+        value: authProvider,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    FilledButton saveButton() => tester.widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Simpan Perubahan'),
+        );
+
+    expect(saveButton().onPressed, isNull);
+    await tester.enterText(find.byType(TextField).first, 'Ayu Lestari Baru');
+    await tester.pump();
+    expect(saveButton().onPressed, isNotNull);
+
+    await tester.drag(find.byType(ListView), const Offset(0, -600));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Simpan Perubahan'));
+    await tester.pumpAndSettle();
+    expect(saveButton().onPressed, isNull);
+  });
+
   testWidgets('StatusChip displays the selected status', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(home: StatusChip(status: TicketStatuses.inProgress)),
@@ -675,7 +853,8 @@ void main() {
       ),
     );
 
-    expect(find.text('Mode offline - menampilkan data tersimpan.'), findsOneWidget);
+    expect(find.text('Mode offline - menampilkan data tersimpan.'),
+        findsOneWidget);
   });
 
   testWidgets('PriorityBadge supports CITO, Segera, and Biasa', (tester) async {

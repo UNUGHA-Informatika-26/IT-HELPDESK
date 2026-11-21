@@ -1,6 +1,8 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -29,6 +31,7 @@ class EmployeeDashboardScreen extends StatefulWidget {
 class _EmployeeDashboardScreenState extends State<EmployeeDashboardScreen> {
   Stream<List<Ticket>>? _tickets;
   String? _uid;
+  DateTime? _lastBackPress;
 
   @override
   void didChangeDependencies() {
@@ -55,6 +58,27 @@ class _EmployeeDashboardScreenState extends State<EmployeeDashboardScreen> {
         );
   }
 
+  void _handleRootBack(bool didPop) {
+    if (didPop) return;
+    final now = DateTime.now();
+    final lastBackPress = _lastBackPress;
+    if (lastBackPress != null &&
+        now.difference(lastBackPress) <= const Duration(seconds: 2)) {
+      _lastBackPress = null;
+      if (!kIsWeb) unawaited(SystemNavigator.pop());
+      return;
+    }
+    _lastBackPress = now;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('Tekan sekali lagi untuk keluar'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
@@ -64,190 +88,221 @@ class _EmployeeDashboardScreenState extends State<EmployeeDashboardScreen> {
     }
     final counts = context.watch<TicketProvider>().counts;
     final today = DateTime.now();
-    return Scaffold(
-      body: SafeArea(
-        child: StreamBuilder<List<Ticket>>(
-          stream: _tickets,
-          builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              return ErrorState(
-                message: 'Tiket gagal dimuat. Periksa koneksi internet.',
-                onRetry: () => setState(
-                  () => _tickets =
-                      context.read<TicketProvider>().watchTickets(user),
-                ),
-              );
-            }
-            if (!snapshot.hasData) return const LoadingState();
-            final tickets = snapshot.data!;
-            return RefreshIndicator(
-              onRefresh: () async {
-                final provider = context.read<TicketProvider>();
-                await provider.refreshTickets(user);
-                await provider.loadCounts(user);
-              },
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-                children: [
-                  OfflineModeBanner(
-                    isOffline: context.watch<TicketProvider>().isOffline,
+    return PopScope<Object?>(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) => _handleRootBack(didPop),
+      child: Scaffold(
+        body: SafeArea(
+          child: StreamBuilder<List<Ticket>>(
+            stream: _tickets,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return ErrorState(
+                  message: 'Tiket gagal dimuat. Periksa koneksi internet.',
+                  onRetry: () => setState(
+                    () => _tickets =
+                        context.read<TicketProvider>().watchTickets(user),
                   ),
-                  if (context.read<TicketProvider>().isOffline) ...[
-                    const SizedBox(height: 8),
-                    _LastUpdatedLabel(
-                      updatedAt: context.watch<TicketProvider>().lastUpdated,
+                );
+              }
+              if (!snapshot.hasData) return const LoadingState();
+              final tickets = snapshot.data!;
+              return RefreshIndicator(
+                onRefresh: () async {
+                  final provider = context.read<TicketProvider>();
+                  await provider.refreshTickets(user);
+                  await provider.loadCounts(user);
+                },
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+                  children: [
+                    OfflineModeBanner(
+                      isOffline: context.watch<TicketProvider>().isOffline,
                     ),
-                  ],
-                  if (context.watch<TicketProvider>().countsError != null) ...[
-                    RetryableAlertBanner(
-                      message: context.watch<TicketProvider>().countsError!,
-                      onRetry: () => _loadCounts(user),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              DateFormatters.weekdayDate(today),
-                              style: const TextStyle(
-                                color: AppColors.muted,
-                                fontSize: 11,
+                    if (context.read<TicketProvider>().isOffline) ...[
+                      const SizedBox(height: 8),
+                      _LastUpdatedLabel(
+                        updatedAt: context.watch<TicketProvider>().lastUpdated,
+                      ),
+                    ],
+                    if (context.watch<TicketProvider>().countsError !=
+                        null) ...[
+                      RetryableAlertBanner(
+                        message: context.watch<TicketProvider>().countsError!,
+                        onRetry: () => _loadCounts(user),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                DateFormatters.weekdayDate(today),
+                                style: const TextStyle(
+                                  color: AppColors.muted,
+                                  fontSize: 11,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Halo, ${_firstName(user.name)}',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineSmall
+                                    ?.copyWith(fontWeight: FontWeight.w700),
+                              ),
+                              const SizedBox(height: 4),
+                              _CompanyLine(name: auth.companyName),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Pemberitahuan',
+                          onPressed: () =>
+                              context.push(AppRoutes.employeeNotifications),
+                          icon: _NotificationBell(
+                            unreadCount: context
+                                .watch<NotificationProvider>()
+                                .unreadCount,
+                          ),
+                        ),
+                        Semantics(
+                          label: 'Buka profil',
+                          button: true,
+                          child: Tooltip(
+                            message: 'Profil',
+                            child: Material(
+                              color: AppColors.primarySoft,
+                              shape: const CircleBorder(),
+                              child: InkWell(
+                                key: const ValueKey(
+                                  'employee-dashboard-profile-avatar',
+                                ),
+                                customBorder: const CircleBorder(),
+                                onTap: () =>
+                                    context.go(AppRoutes.employeeProfile),
+                                child: SizedBox(
+                                  width: 48,
+                                  height: 48,
+                                  child: _InitialAvatar(name: user.name),
+                                ),
                               ),
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Halo, ${_firstName(user.name)}',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .headlineSmall
-                                  ?.copyWith(fontWeight: FontWeight.w700),
-                            ),
-                            const SizedBox(height: 4),
-                            _CompanyLine(name: auth.companyName),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Pemberitahuan',
-                        onPressed: () =>
-                            context.go(AppRoutes.employeeNotifications),
-                        icon: _NotificationBell(
-                          unreadCount:
-                              context.watch<NotificationProvider>().unreadCount,
-                        ),
-                      ),
-                      _InitialAvatar(name: user.name),
-                    ],
-                  ),
-                  const SizedBox(height: 22),
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [AppColors.primary, AppColors.primaryDark],
-                      ),
-                      borderRadius: BorderRadius.circular(22),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x331769E0),
-                          blurRadius: 22,
-                          offset: Offset(0, 10),
+                          ),
                         ),
                       ],
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    const SizedBox(height: 22),
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [AppColors.primary, AppColors.primaryDark],
+                        ),
+                        borderRadius: BorderRadius.circular(22),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x331769E0),
+                            blurRadius: 22,
+                            offset: Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Butuh bantuan IT?',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: .75),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          const Text(
+                            'Laporkan kendala,\nkami siap membantu.',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                              height: 1.35,
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          FilledButton.icon(
+                            onPressed: () =>
+                                context.push(AppRoutes.createTicket),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              foregroundColor: AppColors.primary,
+                              minimumSize: const Size(0, 42),
+                            ),
+                            icon: const Icon(Icons.add),
+                            label: const Text('Buat Tiket'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SectionHeading(title: 'Ringkasan tiket'),
+                    Row(
                       children: [
-                        Text(
-                          'Butuh bantuan IT?',
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: .75),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        const Text(
-                          'Laporkan kendala,\nkami siap membantu.',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                            height: 1.35,
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        FilledButton.icon(
-                          onPressed: () => context.go(AppRoutes.createTicket),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: AppColors.primary,
-                            minimumSize: const Size(0, 42),
-                          ),
-                          icon: const Icon(Icons.add),
-                          label: const Text('Buat Tiket'),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SectionHeading(title: 'Ringkasan tiket'),
-                  Row(
-                    children: [
-                      for (final status in [
-                        TicketStatuses.waiting,
-                        TicketStatuses.inProgress,
-                        TicketStatuses.completed,
-                      ])
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.only(right: 7),
-                            child: StatusSummaryCard(
-                              status: status,
-                              count: counts[status] ?? 0,
+                        for (final status in [
+                          TicketStatuses.waiting,
+                          TicketStatuses.inProgress,
+                          TicketStatuses.completed,
+                        ])
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.only(right: 7),
+                              child: StatusSummaryCard(
+                                status: status,
+                                count: counts[status] ?? 0,
+                              ),
                             ),
                           ),
-                        ),
-                    ],
-                  ),
-                  SectionHeading(
-                    title: 'Tiket terbaru',
-                    action: TextButton(
-                      onPressed: () => context.go(AppRoutes.employeeTickets),
-                      child: const Text('Lihat semua'),
+                      ],
                     ),
-                  ),
-                  if (tickets.isEmpty)
-                    const SizedBox(
-                      height: 190,
-                      child: EmptyState(
-                        title: 'Belum ada tiket',
-                        message: 'Tiket yang Anda buat akan muncul di sini.',
+                    SectionHeading(
+                      title: 'Tiket terbaru',
+                      action: TextButton(
+                        onPressed: () =>
+                            context.push(AppRoutes.employeeTickets),
+                        child: const Text('Lihat semua'),
                       ),
-                    )
-                  else
-                    for (final ticket in tickets.take(2)) ...[
-                      TicketCard(
-                        ticket: ticket,
-                        onRetry: () => context
-                            .read<TicketProvider>()
-                            .retryTicket(ticket.id),
-                        onTap: () => context.go(
-                          '/employee/tickets/${ticket.id}',
+                    ),
+                    if (tickets.isEmpty)
+                      const SizedBox(
+                        height: 190,
+                        child: EmptyState(
+                          title: 'Belum ada tiket',
+                          message: 'Tiket yang Anda buat akan muncul di sini.',
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                    ],
-                ],
-              ),
-            );
-          },
+                      )
+                    else
+                      for (final ticket in tickets.take(2)) ...[
+                        TicketCard(
+                          ticket: ticket,
+                          onRetry: () => context
+                              .read<TicketProvider>()
+                              .retryTicket(ticket.id),
+                          onTap: () => context.push(
+                            '/employee/tickets/${ticket.id}',
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+                  ],
+                ),
+              );
+            },
+          ),
         ),
-      ),
-      bottomNavigationBar: const TicketBottomNavigation(
-        isAdmin: false,
+        bottomNavigationBar: const TicketBottomNavigation(
+          isAdmin: false,
+        ),
       ),
     );
   }
@@ -264,7 +319,13 @@ class NotificationsScreen extends StatelessWidget {
         title: const Text('Pemberitahuan'),
         leading: IconButton(
           tooltip: 'Kembali',
-          onPressed: () => context.go(AppRoutes.employeeHome),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go(AppRoutes.employeeHome);
+            }
+          },
           icon: const Icon(Icons.arrow_back),
         ),
         actions: [
@@ -603,7 +664,7 @@ class _EmployeeTicketsScreenState extends State<EmployeeTicketsScreen> {
                               onRetry: () => context
                                   .read<TicketProvider>()
                                   .retryTicket(ticket.id),
-                              onTap: () => context.go(
+                              onTap: () => context.push(
                                 '/employee/tickets/${ticket.id}',
                               ),
                             );
@@ -631,6 +692,7 @@ class CreateTicketScreen extends StatefulWidget {
 
 class _CreateTicketScreenState extends State<CreateTicketScreen> {
   final _title = TextEditingController();
+  final _customCategory = TextEditingController();
   final _description = TextEditingController();
   String _category = TicketCategories.all.first;
   String _priority = TicketPriorities.normal;
@@ -639,6 +701,7 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
   @override
   void dispose() {
     _title.dispose();
+    _customCategory.dispose();
     _description.dispose();
     super.dispose();
   }
@@ -646,6 +709,13 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
   Future<void> _submit() async {
     setState(() => _validationError = null);
     context.read<TicketProvider>().clearError();
+    final categoryError = _category == TicketCategories.other
+        ? FormValidators.customCategory(_customCategory.text)
+        : null;
+    if (categoryError != null) {
+      setState(() => _validationError = categoryError);
+      return;
+    }
     if (_title.text.trim().isEmpty || _description.text.trim().isEmpty) {
       setState(() {
         _validationError = 'Lengkapi semua field wajib sebelum mengirim.';
@@ -658,11 +728,21 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
       setState(() => _validationError = validationError);
       return;
     }
+    final title = _category == TicketCategories.other
+        ? CustomCategoryTitle.compose(_customCategory.text, _title.text)
+        : _title.text;
+    if (title.trim().length > AppConstants.maxTicketTitleLength) {
+      setState(
+        () => _validationError =
+            'Judul dan keterangan benda maksimal 100 karakter jika digabung.',
+      );
+      return;
+    }
     final user = context.read<AuthProvider>().user;
     if (user == null) return;
     final id = await context.read<TicketProvider>().createTicket(
           user: user,
-          title: _title.text,
+          title: title,
           description: _description.text,
           category: _category,
           priority: _priority,
@@ -673,17 +753,22 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
       final queued =
           await context.read<TicketProvider>().isQueued(user.uid, id);
       if (!mounted) return;
-      context.go(
-        '/employee/tickets/$id',
-        extra: queued
-            ? 'Tiket tersimpan di perangkat dan akan dikirim saat online.'
-            : 'Tiket $number berhasil dibuat',
-      );
+      if (context.canPop()) {
+        context.pop();
+      } else {
+        context.go(
+          AppRoutes.employeeTickets,
+          extra: queued
+              ? 'Tiket tersimpan di perangkat dan akan dikirim saat online.'
+              : 'Tiket $number berhasil dibuat',
+        );
+      }
     }
   }
 
   Future<void> _requestBack() async {
     final isDirty = _title.text.trim().isNotEmpty ||
+        _customCategory.text.trim().isNotEmpty ||
         _description.text.trim().isNotEmpty ||
         _category != TicketCategories.all.first ||
         _priority != TicketPriorities.normal;
@@ -696,12 +781,23 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
       );
       if (discard != true || !mounted) return;
     }
-    context.go(AppRoutes.employeeHome);
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go(AppRoutes.employeeHome);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<TicketProvider>();
+    final combinedTitle = _category == TicketCategories.other
+        ? CustomCategoryTitle.compose(_customCategory.text, _title.text)
+        : _title.text;
+    final titleLengthError = _category == TicketCategories.other &&
+            combinedTitle.trim().length > AppConstants.maxTicketTitleLength
+        ? 'Judul dan keterangan benda maksimal 100 karakter jika digabung.'
+        : null;
     return PopScope<Object?>(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -750,6 +846,9 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
                   if (value != null) {
                     setState(() {
                       _category = value;
+                      if (value != TicketCategories.other) {
+                        _customCategory.clear();
+                      }
                       _validationError = null;
                     });
                     context.read<TicketProvider>().clearError();
@@ -757,6 +856,22 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
                 },
               ),
               const SizedBox(height: 14),
+              if (_category == TicketCategories.other) ...[
+                TextFormField(
+                  key: const ValueKey('custom-category-description'),
+                  controller: _customCategory,
+                  onChanged: (_) {
+                    setState(() => _validationError = null);
+                    context.read<TicketProvider>().clearError();
+                  },
+                  maxLength: 50,
+                  decoration: const InputDecoration(
+                    label: RequiredFieldLabel('Sebutkan benda yang dilaporkan'),
+                    hintText: 'contoh: proyektor, CCTV, mesin absen',
+                  ),
+                ),
+                const SizedBox(height: 14),
+              ],
               DropdownButtonFormField<String>(
                 key: const ValueKey('ticket-priority'),
                 initialValue: _priority,
@@ -783,9 +898,10 @@ class _CreateTicketScreenState extends State<CreateTicketScreen> {
                   context.read<TicketProvider>().clearError();
                 },
                 maxLength: AppConstants.maxTicketTitleLength,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   label: RequiredFieldLabel('Judul kendala'),
                   hintText: 'Ringkas dan spesifik',
+                  errorText: titleLengthError,
                 ),
               ),
               const SizedBox(height: 12),
@@ -893,7 +1009,13 @@ class _EditTicketScreenState extends State<EditTicketScreen> {
             key: _formKey,
             ticket: ticket,
             isEditing: true,
-            onBack: () => context.go('/employee/tickets/${ticket.id}'),
+            onBack: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/employee/tickets/${ticket.id}');
+              }
+            },
             onSubmit: (title, description, category, priority) async {
               final ok = await context.read<TicketProvider>().editTicket(
                     ticketId: ticket.id,
@@ -907,12 +1029,16 @@ class _EditTicketScreenState extends State<EditTicketScreen> {
                   .read<TicketProvider>()
                   .isQueued(ticket.userId, ticket.id);
               if (!context.mounted) return;
-              context.go(
-                '/employee/tickets/${ticket.id}',
-                extra: queued
-                    ? 'Tiket tersimpan di perangkat dan akan dikirim saat online.'
-                    : 'Perubahan tiket berhasil disimpan',
-              );
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go(
+                  AppRoutes.employeeTickets,
+                  extra: queued
+                      ? 'Tiket tersimpan di perangkat dan akan dikirim saat online.'
+                      : 'Perubahan tiket berhasil disimpan',
+                );
+              }
             },
           );
         },
@@ -975,9 +1101,15 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
       appBar: AppBar(
         title: const Text('Detail Tiket'),
         leading: IconButton(
-          onPressed: () => context.go(
-            widget.isAdmin ? AppRoutes.adminTickets : AppRoutes.employeeTickets,
-          ),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go(widget.isAdmin
+                  ? AppRoutes.adminTickets
+                  : AppRoutes.employeeTickets);
+            }
+          },
           icon: const Icon(Icons.arrow_back),
         ),
       ),
@@ -1001,7 +1133,13 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
                 : EmptyState(
                     title: 'Tiket ini sudah dihapus atau tidak tersedia',
                     actionLabel: 'Kembali ke Tiket Saya',
-                    onAction: () => context.go(AppRoutes.employeeTickets),
+                    onAction: () {
+                      if (context.canPop()) {
+                        context.pop();
+                      } else {
+                        context.go(AppRoutes.employeeTickets);
+                      }
+                    },
                   );
           }
           return StreamBuilder<List<TicketUpdate>>(
@@ -1185,7 +1323,7 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
           ticket: ticket,
           isAdmin: widget.isAdmin,
           isOwner: isOwner,
-          onEdit: () => context.go('/employee/tickets/${ticket.id}/edit'),
+          onEdit: () => context.push('/employee/tickets/${ticket.id}/edit'),
           onCancel: () => _confirmCancel(context, ticket),
           isOnline: !ticketProvider.isOffline,
           adminActionBuilder: () => _AdminActionCard(
@@ -1278,11 +1416,17 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
           .read<TicketProvider>()
           .isQueued(ticket.userId, ticket.id);
       if (!context.mounted) return;
-      setState(
-        () => _successMessage = queued
-            ? 'Tiket tersimpan di perangkat dan akan dikirim saat online.'
-            : 'Tiket berhasil dibatalkan',
-      );
+      final message = queued
+          ? 'Tiket tersimpan di perangkat dan akan dikirim saat online.'
+          : 'Tiket berhasil dibatalkan';
+      if (context.canPop()) {
+        context.pop();
+      } else {
+        context.go(
+          widget.isAdmin ? AppRoutes.adminTickets : AppRoutes.employeeTickets,
+          extra: message,
+        );
+      }
     }
   }
 
@@ -1341,7 +1485,6 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
   }
 
   Future<void> _deleteTicket(Ticket ticket, String reason) async {
-    final router = GoRouter.of(context);
     final provider = context.read<TicketProvider>();
     final admin = context.read<AuthProvider>().user;
     if (admin == null) return;
@@ -1357,10 +1500,14 @@ class _TicketDetailScreenState extends State<TicketDetailScreen> {
     }
     if (!mounted) return;
     if (ok) {
-      router.go(
-        widget.isAdmin ? AppRoutes.adminTickets : AppRoutes.employeeTickets,
-        extra: 'Tiket ${ticket.ticketNumber} berhasil dihapus',
-      );
+      if (context.canPop()) {
+        context.pop();
+      } else {
+        context.go(
+          widget.isAdmin ? AppRoutes.adminTickets : AppRoutes.employeeTickets,
+          extra: 'Tiket ${ticket.ticketNumber} berhasil dihapus',
+        );
+      }
     }
   }
 }
@@ -1378,6 +1525,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _name = TextEditingController();
   final _department = TextEditingController();
   String? _loadedUid;
+  String _initialName = '';
+  String _initialDepartment = '';
   bool _busy = false;
   String? _message;
   bool _messageIsError = false;
@@ -1394,8 +1543,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _loadedUid = user.uid;
       _name.text = user.name;
       _department.text = user.department;
+      _initialName = user.name.trim();
+      _initialDepartment = user.department.trim();
     }
   }
+
+  bool get _hasChanges =>
+      _name.text.trim() != _initialName ||
+      (!widget.isAdmin && _department.text.trim() != _initialDepartment);
 
   @override
   void dispose() {
@@ -1418,12 +1573,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _message = null;
     });
     final ok = await context.read<AuthProvider>().updateProfile(
-          name: _name.text,
-          department: widget.isAdmin ? null : _department.text,
+          name: _name.text.trim(),
+          department: widget.isAdmin ? null : _department.text.trim(),
         );
     if (!mounted) return;
     setState(() {
       _busy = false;
+      if (ok) {
+        _initialName = _name.text.trim();
+        if (!widget.isAdmin) _initialDepartment = _department.text.trim();
+      }
       _message = ok
           ? 'Profil berhasil diperbarui.'
           : context.read<AuthProvider>().error;
@@ -1544,7 +1703,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const SizedBox(height: 12),
                   ],
                   FilledButton(
-                    onPressed: _busy ? null : _save,
+                    onPressed: _busy || !_hasChanges ? null : _save,
                     child: Text(
                       _busy ? 'Menyimpan...' : 'Simpan Perubahan',
                     ),
@@ -1597,22 +1756,35 @@ class _TicketForm extends StatefulWidget {
 
 class _TicketFormState extends State<_TicketForm> {
   final _title = TextEditingController();
+  final _customCategory = TextEditingController();
   final _description = TextEditingController();
   late String _category = widget.ticket.category;
   late String _priority = widget.ticket.priority;
+  late String _initialTitle;
+  late String _initialCustomCategory;
   bool _busy = false;
   String? _validationError;
 
   @override
   void initState() {
     super.initState();
-    _title.text = widget.ticket.title;
+    if (_category == TicketCategories.other) {
+      final (categoryItem, title) =
+          CustomCategoryTitle.split(widget.ticket.title);
+      _customCategory.text = categoryItem ?? '';
+      _title.text = title;
+    } else {
+      _title.text = widget.ticket.title;
+    }
+    _initialTitle = _title.text;
+    _initialCustomCategory = _customCategory.text.trim();
     _description.text = widget.ticket.description;
   }
 
   @override
   void dispose() {
     _title.dispose();
+    _customCategory.dispose();
     _description.dispose();
     super.dispose();
   }
@@ -1623,15 +1795,29 @@ class _TicketFormState extends State<_TicketForm> {
     provider.clearError();
     final validationError = _category.isEmpty
         ? 'Pilih kategori.'
-        : FormValidators.ticketTitle(_title.text) ??
-            FormValidators.ticketDescription(_description.text);
+        : _category == TicketCategories.other
+            ? FormValidators.customCategory(_customCategory.text) ??
+                FormValidators.ticketTitle(_title.text) ??
+                FormValidators.ticketDescription(_description.text)
+            : FormValidators.ticketTitle(_title.text) ??
+                FormValidators.ticketDescription(_description.text);
     if (validationError != null) {
       setState(() => _validationError = validationError);
       return;
     }
+    final title = _category == TicketCategories.other
+        ? CustomCategoryTitle.compose(_customCategory.text, _title.text)
+        : _title.text;
+    if (title.trim().length > AppConstants.maxTicketTitleLength) {
+      setState(
+        () => _validationError =
+            'Judul dan keterangan benda maksimal 100 karakter jika digabung.',
+      );
+      return;
+    }
     setState(() => _busy = true);
     await widget.onSubmit(
-      _title.text,
+      title,
       _description.text,
       _category,
       _priority,
@@ -1640,7 +1826,8 @@ class _TicketFormState extends State<_TicketForm> {
   }
 
   bool get _hasChanges =>
-      _title.text != widget.ticket.title ||
+      _title.text != _initialTitle ||
+      _customCategory.text.trim() != _initialCustomCategory ||
       _description.text != widget.ticket.description ||
       _category != widget.ticket.category ||
       _priority != widget.ticket.priority;
@@ -1661,6 +1848,13 @@ class _TicketFormState extends State<_TicketForm> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<TicketProvider>();
+    final combinedTitle = _category == TicketCategories.other
+        ? CustomCategoryTitle.compose(_customCategory.text, _title.text)
+        : _title.text;
+    final titleLengthError = _category == TicketCategories.other &&
+            combinedTitle.trim().length > AppConstants.maxTicketTitleLength
+        ? 'Judul dan keterangan benda maksimal 100 karakter jika digabung.'
+        : null;
     return PopScope<Object?>(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -1698,6 +1892,9 @@ class _TicketFormState extends State<_TicketForm> {
                 if (value != null) {
                   setState(() {
                     _category = value;
+                    if (value != TicketCategories.other) {
+                      _customCategory.clear();
+                    }
                     _validationError = null;
                   });
                   context.read<TicketProvider>().clearError();
@@ -1705,6 +1902,22 @@ class _TicketFormState extends State<_TicketForm> {
               },
             ),
             const SizedBox(height: 14),
+            if (_category == TicketCategories.other) ...[
+              TextFormField(
+                key: const ValueKey('custom-category-description'),
+                controller: _customCategory,
+                onChanged: (_) {
+                  setState(() => _validationError = null);
+                  context.read<TicketProvider>().clearError();
+                },
+                maxLength: 50,
+                decoration: const InputDecoration(
+                  label: RequiredFieldLabel('Sebutkan benda yang dilaporkan'),
+                  hintText: 'contoh: proyektor, CCTV, mesin absen',
+                ),
+              ),
+              const SizedBox(height: 14),
+            ],
             DropdownButtonFormField<String>(
               initialValue: _priority,
               decoration: const InputDecoration(
@@ -1724,15 +1937,17 @@ class _TicketFormState extends State<_TicketForm> {
             const _PriorityHelp(),
             const SizedBox(height: 14),
             TextFormField(
+              key: const ValueKey('ticket-title'),
               controller: _title,
               onChanged: (_) {
                 setState(() => _validationError = null);
                 context.read<TicketProvider>().clearError();
               },
               maxLength: AppConstants.maxTicketTitleLength,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 label: RequiredFieldLabel('Judul kendala'),
                 hintText: 'Ringkas dan spesifik',
+                errorText: titleLengthError,
               ),
             ),
             const SizedBox(height: 12),
@@ -2081,7 +2296,7 @@ class _InitialAvatar extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         color: AppColors.primarySoft,
-        borderRadius: BorderRadius.circular(large ? 23 : 15),
+        shape: BoxShape.circle,
       ),
       alignment: Alignment.center,
       child: Text(

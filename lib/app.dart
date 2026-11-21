@@ -1,8 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -16,7 +14,6 @@ import 'providers/auth_provider.dart';
 import 'providers/notification_provider.dart';
 import 'providers/ticket_provider.dart';
 import 'router.dart';
-import 'widgets/helpdesk_widgets.dart';
 
 class HelpdeskApp extends StatefulWidget {
   const HelpdeskApp({super.key});
@@ -137,40 +134,60 @@ class _AppBackHandler extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => PopScope<Object?>(
-        canPop: false,
-        onPopInvokedWithResult: (didPop, _) {
-          if (!didPop) unawaited(_handleBack(context));
-        },
-        child: child,
-      );
+  Widget build(BuildContext context) {
+    final router = GoRouter.of(context);
+    final path = router.routeInformationProvider.value.uri.path;
+    final isTab = {
+      AppRoutes.employeeTickets,
+      AppRoutes.employeeProfile,
+      AppRoutes.adminTickets,
+      AppRoutes.reports,
+      AppRoutes.adminProfile,
+    }.contains(path);
+    return PopScope<Object?>(
+      canPop: router.canPop() && !isTab,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) unawaited(_handleBack(context, path));
+      },
+      child: child,
+    );
+  }
 
-  Future<void> _handleBack(BuildContext context) async {
-    final path = GoRouter.of(context).routeInformationProvider.value.uri.path;
+  Future<void> _handleBack(BuildContext context, String path) async {
     if (path == AppRoutes.createTicket ||
         path.startsWith('/employee/tickets/') && path.endsWith('/edit')) {
       return;
     }
-    final auth = context.read<AuthProvider>();
     final isHome =
         path == AppRoutes.employeeHome || path == AppRoutes.adminHome;
-    if (isHome && auth.isSignedIn) {
-      final exit = await showConfirmDialog(
-        context: context,
-        title: 'Keluar dari aplikasi?',
-        content: const Text('Aplikasi akan ditutup.'),
-        confirmLabel: 'Ya, Keluar',
-        icon: Icons.exit_to_app,
-      );
-      if (exit == true && !kIsWeb) await SystemNavigator.pop();
+    if (isHome ||
+        path == AppRoutes.login ||
+        path == AppRoutes.splash ||
+        path == AppRoutes.onboarding ||
+        path == AppRoutes.register ||
+        path == AppRoutes.resetPassword) {
       return;
     }
-    context.go(
-      auth.user?.isAdmin == true
-          ? AppRoutes.adminHome
-          : auth.isSignedIn
-              ? AppRoutes.employeeHome
-              : AppRoutes.login,
-    );
+    final auth = context.read<AuthProvider>();
+    final home = auth.user?.isAdmin == true
+        ? AppRoutes.adminHome
+        : AppRoutes.employeeHome;
+    if ({
+      AppRoutes.employeeTickets,
+      AppRoutes.employeeProfile,
+      AppRoutes.adminTickets,
+      AppRoutes.reports,
+      AppRoutes.adminProfile,
+    }.contains(path)) {
+      context.go(home);
+    } else if (GoRouter.of(context).canPop()) {
+      context.pop();
+    } else {
+      context.go(
+        auth.user?.isAdmin == true
+            ? AppRoutes.adminTickets
+            : AppRoutes.employeeTickets,
+      );
+    }
   }
 }

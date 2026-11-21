@@ -49,6 +49,13 @@ class FormValidators {
     return null;
   }
 
+  static String? customCategory(String? value) {
+    final category = value?.trim() ?? '';
+    if (category.isEmpty) return 'Sebutkan benda yang dilaporkan.';
+    if (category.length > 50) return 'Keterangan benda maksimal 50 karakter.';
+    return null;
+  }
+
   static String? ticketDescription(String? value) {
     final description = value?.trim() ?? '';
     if (description.isEmpty) return 'Deskripsi wajib diisi.';
@@ -56,5 +63,17 @@ class FormValidators {
       return 'Deskripsi maksimal 1000 karakter.';
     }
     return null;
+  }
+}
+
+abstract final class CustomCategoryTitle {
+  static String compose(String categoryItem, String title) =>
+      '[${categoryItem.trim()}] ${title.trim()}';
+
+  static (String? categoryItem, String title) split(String title) {
+    final match =
+        RegExp(r'^\[([^\]]*)\]\s*(.*)$', dotAll: true).firstMatch(title.trim());
+    if (match == null) return (null, title);
+    return (match.group(1)!.trim(), match.group(2)!.trim());
   }
 }

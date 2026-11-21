@@ -1,4 +1,8 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -22,6 +26,7 @@ class AdminDashboardScreen extends StatefulWidget {
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Stream<List<Ticket>>? _tickets;
   String? _uid;
+  DateTime? _lastBackPress;
 
   @override
   void didChangeDependencies() {
@@ -48,6 +53,27 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         );
   }
 
+  void _handleRootBack(bool didPop) {
+    if (didPop) return;
+    final now = DateTime.now();
+    final lastBackPress = _lastBackPress;
+    if (lastBackPress != null &&
+        now.difference(lastBackPress) <= const Duration(seconds: 2)) {
+      _lastBackPress = null;
+      if (!kIsWeb) unawaited(SystemNavigator.pop());
+      return;
+    }
+    _lastBackPress = now;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('Tekan sekali lagi untuk keluar'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
@@ -56,180 +82,202 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     final counts = context.watch<TicketProvider>().counts;
-    return Scaffold(
-      body: SafeArea(
-        child: StreamBuilder<List<Ticket>>(
-          stream: _tickets,
-          builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              return ErrorState(
-                message: 'Tiket gagal dimuat. Periksa koneksi internet.',
-                onRetry: () => setState(
-                  () => _tickets =
-                      context.read<TicketProvider>().watchTickets(user),
-                ),
-              );
-            }
-            if (!snapshot.hasData) return const LoadingState();
-            final tickets = snapshot.data!;
-            return ListView(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-              children: [
-                OfflineModeBanner(
-                  isOffline: context.watch<TicketProvider>().isOffline,
-                ),
-                if (context.read<TicketProvider>().isOffline)
-                  const SizedBox(height: 8),
-                if (context.watch<TicketProvider>().countsError != null) ...[
-                  RetryableAlertBanner(
-                    message: context.watch<TicketProvider>().countsError!,
-                    onRetry: () => _loadCounts(user),
+    return PopScope<Object?>(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) => _handleRootBack(didPop),
+      child: Scaffold(
+        body: SafeArea(
+          child: StreamBuilder<List<Ticket>>(
+            stream: _tickets,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return ErrorState(
+                  message: 'Tiket gagal dimuat. Periksa koneksi internet.',
+                  onRetry: () => setState(
+                    () => _tickets =
+                        context.read<TicketProvider>().watchTickets(user),
                   ),
-                  const SizedBox(height: 8),
-                ],
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            DateFormat('EEEE, d MMMM', 'id_ID')
-                                .format(DateTime.now()),
-                            style: const TextStyle(
-                              color: AppColors.muted,
-                              fontSize: 11,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Halo, ${user.name.trim().split(RegExp(r'\s+')).first}',
-                            style: Theme.of(context)
-                                .textTheme
-                                .headlineSmall
-                                ?.copyWith(fontWeight: FontWeight.w700),
-                          ),
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.business_outlined,
-                                size: 15,
-                                color: AppColors.muted,
-                              ),
-                              const SizedBox(width: 5),
-                              Text(
-                                auth.companyName,
-                                style: const TextStyle(
-                                  color: AppColors.muted,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
+                );
+              }
+              if (!snapshot.hasData) return const LoadingState();
+              final tickets = snapshot.data!;
+              return ListView(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+                children: [
+                  OfflineModeBanner(
+                    isOffline: context.watch<TicketProvider>().isOffline,
+                  ),
+                  if (context.read<TicketProvider>().isOffline)
+                    const SizedBox(height: 8),
+                  if (context.watch<TicketProvider>().countsError != null) ...[
+                    RetryableAlertBanner(
+                      message: context.watch<TicketProvider>().countsError!,
+                      onRetry: () => _loadCounts(user),
                     ),
-                    CircleAvatar(
-                      radius: 24,
-                      backgroundColor: AppColors.primarySoft,
-                      child: Text(
-                        _initials(user.name),
-                        style: const TextStyle(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
+                    const SizedBox(height: 8),
                   ],
-                ),
-                Container(
-                  margin: const EdgeInsets.only(top: 20, bottom: 2),
-                  padding: const EdgeInsets.all(15),
-                  decoration: BoxDecoration(
-                    color: AppColors.primarySoft,
-                    border: Border.all(color: const Color(0xFFCFE0FB)),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: const Row(
+                  Row(
                     children: [
-                      Icon(Icons.headset_mic_outlined,
-                          color: AppColors.primary),
-                      SizedBox(width: 12),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Admin IT',
-                              style: TextStyle(
-                                color: AppColors.primary,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            Text(
-                              'Kelola dan selesaikan tiket perusahaan',
-                              style: TextStyle(
-                                color: Color(0xFF58749A),
+                              DateFormat('EEEE, d MMMM', 'id_ID')
+                                  .format(DateTime.now()),
+                              style: const TextStyle(
+                                color: AppColors.muted,
                                 fontSize: 11,
                               ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Halo, ${user.name.trim().split(RegExp(r'\s+')).first}',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .headlineSmall
+                                  ?.copyWith(fontWeight: FontWeight.w700),
+                            ),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.business_outlined,
+                                  size: 15,
+                                  color: AppColors.muted,
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  auth.companyName,
+                                  style: const TextStyle(
+                                    color: AppColors.muted,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
                       ),
+                      Semantics(
+                        label: 'Buka profil',
+                        button: true,
+                        child: Tooltip(
+                          message: 'Profil',
+                          child: Material(
+                            color: AppColors.primarySoft,
+                            shape: const CircleBorder(),
+                            child: InkWell(
+                              customBorder: const CircleBorder(),
+                              onTap: () => context.go(AppRoutes.adminProfile),
+                              child: SizedBox(
+                                width: 48,
+                                height: 48,
+                                child: Center(
+                                  child: Text(
+                                    _initials(user.name),
+                                    style: const TextStyle(
+                                      color: AppColors.primary,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
-                ),
-                const SectionHeading(title: 'Ringkasan tiket'),
-                GridView(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    mainAxisExtent: 112,
-                    crossAxisSpacing: 9,
-                    mainAxisSpacing: 9,
-                  ),
-                  children: [
-                    for (final status in TicketStatuses.all)
-                      StatusSummaryCard(
-                        status: status,
-                        count: counts[status] ?? 0,
-                      ),
-                  ],
-                ),
-                SectionHeading(
-                  title: 'Tiket terbaru',
-                  action: TextButton(
-                    onPressed: () => context.go(AppRoutes.adminTickets),
-                    child: const Text('Lihat semua'),
-                  ),
-                ),
-                if (tickets.isEmpty)
-                  const SizedBox(
-                    height: 190,
-                    child: EmptyState(
-                      title: 'Belum ada tiket',
-                      message: 'Tiket perusahaan akan muncul di sini.',
+                  Container(
+                    margin: const EdgeInsets.only(top: 20, bottom: 2),
+                    padding: const EdgeInsets.all(15),
+                    decoration: BoxDecoration(
+                      color: AppColors.primarySoft,
+                      border: Border.all(color: const Color(0xFFCFE0FB)),
+                      borderRadius: BorderRadius.circular(16),
                     ),
-                  )
-                else
-                  for (final ticket in tickets.take(2)) ...[
-                    TicketCard(
-                      ticket: ticket,
-                      showReporter: true,
-                      onTap: () => context.go(
-                        '/admin/tickets/${ticket.id}',
-                      ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.headset_mic_outlined,
+                            color: AppColors.primary),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Admin IT',
+                                style: TextStyle(
+                                  color: AppColors.primary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              Text(
+                                'Kelola dan selesaikan tiket perusahaan',
+                                style: TextStyle(
+                                  color: Color(0xFF58749A),
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 10),
-                  ],
-              ],
-            );
-          },
+                  ),
+                  const SectionHeading(title: 'Ringkasan tiket'),
+                  GridView(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      mainAxisExtent: 112,
+                      crossAxisSpacing: 9,
+                      mainAxisSpacing: 9,
+                    ),
+                    children: [
+                      for (final status in TicketStatuses.all)
+                        StatusSummaryCard(
+                          status: status,
+                          count: counts[status] ?? 0,
+                        ),
+                    ],
+                  ),
+                  SectionHeading(
+                    title: 'Tiket terbaru',
+                    action: TextButton(
+                      onPressed: () => context.push(AppRoutes.adminTickets),
+                      child: const Text('Lihat semua'),
+                    ),
+                  ),
+                  if (tickets.isEmpty)
+                    const SizedBox(
+                      height: 190,
+                      child: EmptyState(
+                        title: 'Belum ada tiket',
+                        message: 'Tiket perusahaan akan muncul di sini.',
+                      ),
+                    )
+                  else
+                    for (final ticket in tickets.take(2)) ...[
+                      TicketCard(
+                        ticket: ticket,
+                        showReporter: true,
+                        onTap: () => context.push(
+                          '/admin/tickets/${ticket.id}',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                ],
+              );
+            },
+          ),
         ),
-      ),
-      bottomNavigationBar: const TicketBottomNavigation(
-        isAdmin: true,
+        bottomNavigationBar: const TicketBottomNavigation(
+          isAdmin: true,
+        ),
       ),
     );
   }
@@ -394,7 +442,7 @@ class _AdminTicketsScreenState extends State<AdminTicketsScreen> {
                           return TicketCard(
                             ticket: ticket,
                             showReporter: true,
-                            onTap: () => context.go(
+                            onTap: () => context.push(
                               '/admin/tickets/${ticket.id}',
                             ),
                           );

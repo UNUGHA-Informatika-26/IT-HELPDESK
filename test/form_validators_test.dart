@@ -44,6 +44,30 @@ void main() {
       expect(FormValidators.ticketDescription('Issue detail'), isNull);
       expect(FormValidators.ticketDescription('a' * 1001), isNotNull);
     });
+
+    test('validates required custom category descriptions up to 50 chars', () {
+      expect(FormValidators.customCategory(' '), isNotNull);
+      expect(FormValidators.customCategory('a' * 50), isNull);
+      expect(FormValidators.customCategory('a' * 51), isNotNull);
+    });
+
+    test('composes and splits custom category title prefixes', () {
+      const item = 'Proyektor';
+      const title = 'Tidak menyala';
+      final composed = CustomCategoryTitle.compose(item, title);
+
+      expect(composed, '[Proyektor] Tidak menyala');
+      expect(CustomCategoryTitle.split(composed), (item, title));
+      expect(CustomCategoryTitle.split('Judul lama'), (null, 'Judul lama'));
+    });
+
+    test('enforces 100 characters for combined custom category titles', () {
+      final fits = CustomCategoryTitle.compose('a' * 10, 'b' * 87);
+      final exceeds = CustomCategoryTitle.compose('a' * 10, 'b' * 88);
+
+      expect(FormValidators.ticketTitle(fits), isNull);
+      expect(FormValidators.ticketTitle(exceeds), isNotNull);
+    });
   });
 
   group('Ticket number', () {
